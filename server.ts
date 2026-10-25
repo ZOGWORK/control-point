@@ -16614,7 +16614,8 @@ NOTES>>>`;
       const docsCount = (await dbGet("SELECT COUNT(*) AS n FROM cad_docs WHERE team_id = ?", teamId) as any).n;
       const pendingReviews = (await dbGet("SELECT COUNT(*) AS n FROM cad_reviews WHERE team_id = ? AND status = 'in_review'", teamId) as any).n;
       const snapshotsCount = (await dbGet("SELECT COUNT(*) AS n FROM cad_snapshots WHERE team_id = ?", teamId) as any).n;
-      const partsAgg = (await dbGet("SELECT COUNT(*) AS n, COALESCE(SUM(quantity * unit_cost), 0) AS total FROM cad_parts WHERE team_id = ?", teamId)) as any;
+      // Priced and to-order counts let the Overview say "3 of 10 priced" instead of presenting unpriced parts as $0.00.
+      const partsAgg = (await dbGet("SELECT COUNT(*) AS n, COALESCE(SUM(quantity * unit_cost), 0) AS total, COALESCE(SUM(CASE WHEN unit_cost > 0 THEN 1 ELSE 0 END), 0) AS priced, COALESCE(SUM(CASE WHEN status = 'to_order' THEN 1 ELSE 0 END), 0) AS to_order FROM cad_parts WHERE team_id = ?", teamId)) as any;
       const needsAttention = await dbAll(`
         SELECT r.id, r.title, r.section, r.updated_at, m.name AS author_name
         FROM cad_reviews r LEFT JOIN members m ON m.id = r.created_by
@@ -16630,7 +16631,7 @@ NOTES>>>`;
         ORDER BY ts DESC LIMIT 10`, teamId, teamId, teamId, teamId);
       res.json({
         docsCount, pendingReviews, snapshotsCount,
-        partsCount: partsAgg.n, partsTotalCost: Math.round(partsAgg.total * 100) / 100,
+        partsCount: partsAgg.n, partsTotalCost: Math.round(partsAgg.total * 100) / 100, partsPriced: Number(partsAgg.priced), partsToOrder: Number(partsAgg.to_order),
         needsAttention, recent,
         sections: CAD_SECTIONS, reviewStatuses: REVIEW_STATUSES,
         reviewStatusLabels: REVIEW_STATUS_LABELS, partSources: PART_SOURCES,

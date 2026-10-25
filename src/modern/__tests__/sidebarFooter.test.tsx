@@ -6,6 +6,7 @@ import { LayoutDashboard } from 'lucide-react';
 vi.mock('../../services/api', async (orig) => ({ ...(await orig<object>()), apiFetch: vi.fn(async () => ({ ok: false, json: async () => ({}) })) }));
 
 import { ModernShell } from '../ModernShell';
+import { buildModernNav, flattenNav } from '../nav';
 
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as any;
 afterEach(() => { cleanup(); localStorage.clear(); });
@@ -47,6 +48,37 @@ describe('sidebar footer (UX-12)', () => {
     shell();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+  });
+});
+
+describe('Control Kit sister-app row', () => {
+  it('sits beside Control Scout and opens Control Kit in a new tab', () => {
+    shell();
+    const kit = screen.getByRole('link', { name: /Control Kit/ });
+    expect(kit).toHaveAttribute('href', 'https://control-kit.pages.dev');
+    expect(kit).toHaveAttribute('target', '_blank');
+    expect(kit).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(kit).toHaveTextContent('(opens in a new tab)');
+    expect(kit).not.toHaveAttribute('aria-current');
+    expect(kit.querySelector('img')).toHaveAttribute('src', '/control-kit-icon.png');
+    const scout = screen.getByRole('link', { name: /Control Scout/ });
+    expect(scout.parentElement).toBe(kit.parentElement);
+  });
+
+  it('collapses to its icon with an accessible name', () => {
+    localStorage.setItem('cp-modern-sidebar-collapsed', 'true');
+    shell();
+    const kit = screen.getByRole('link', { name: 'Control Kit (opens in a new tab)' });
+    expect(kit).toHaveAttribute('href', 'https://control-kit.pages.dev');
+    expect(kit).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(kit.querySelector('img')).not.toBeNull();
+  });
+
+  it('is not an internal page: never in the nav or its saved order', () => {
+    const nav = flattenNav(buildModernNav([{ id: 'dashboard', path: 'dashboard', labelKey: 'nav.dashboard', icon: LayoutDashboard }] as any));
+    expect(JSON.stringify(nav).toLowerCase()).not.toContain('kit');
+    shell();
+    expect(localStorage.getItem('cp-sidebar-order') ?? '').not.toContain('kit');
   });
 });
 
