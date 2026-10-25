@@ -2,7 +2,9 @@
 // per-subsystem tables with row menus, a drafted add / edit sheet, and the
 // Bruno invoice import as a review dialog.
 import { useMemo } from 'react';
-import { Check, CircleDollarSign, FileUp, Loader2, MoreHorizontal, Package, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { Check, CircleDollarSign, ExternalLink, FileUp, Loader2, MoreHorizontal, Package, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
+import { CONTROL_KIT_URL } from '../../../utils/controlKit';
+import { bomCost, money, pricedText, subtotalText } from '../../../utils/cadCost';
 import { useRecordFocus } from '../../hooks/useRecordFocus';
 import { cn } from '../../../components/cn';
 import {
@@ -38,7 +40,6 @@ const STATUS_BADGE: Record<string, string> = {
   to_order: 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-300',
   installed: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
 };
-const money = (n: number) => `$${(Number(n) || 0).toFixed(2)}`;
 
 export function CadPartsTab() {
   const ctl = useCadParts();
@@ -51,13 +52,20 @@ export function CadPartsTab() {
   const editing = ctl.editing && ctl.editing !== 'new' ? ctl.editing : null;
   const ordered = useMemo(() => ctl.grouped.flatMap((g: any) => g.items), [ctl.grouped]);
   const sel = useSelection(ordered, rowId);
+  const cost = useMemo(() => bomCost(ctl.parts), [ctl.parts]);
   return (
     <>
-      <Reveal className="mb-8 grid gap-6 rounded-2xl border border-border bg-card p-6 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+      <Reveal className="mb-8 grid gap-6 rounded-2xl border border-border bg-card p-6 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center 2xl:grid-cols-[auto_minmax(0,1fr)_auto]">
         <div>
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><CircleDollarSign className="size-4 text-accent" />Total BOM cost</p>
-          <p className="mt-1 font-display text-4xl font-semibold tabular-nums"><AnimatedValue value={money(ctl.total)} /></p>
-          <p className="text-sm text-muted-foreground">{ctl.parts.length} part{ctl.parts.length === 1 ? '' : 's'}</p>
+          {/* Unpriced parts are not free: with nothing priced the total says so instead of a finished-looking $0.00. */}
+          {cost.lines > 0 && !cost.priced
+            ? <p className="mt-1 font-display text-4xl font-semibold">No prices yet</p>
+            : <p className="mt-1 font-display text-4xl font-semibold tabular-nums"><AnimatedValue value={money(cost.total)} /></p>}
+          <p className="text-sm text-muted-foreground">
+            {cost.lines > 0 && !cost.priced ? `${money(cost.total)} priced subtotal · ` : cost.unpriced ? 'Priced subtotal · ' : ''}
+            {cost.lines ? `${pricedText(cost)} · ${cost.toOrder} to order` : '0 parts'}
+          </p>
         </div>
         <div className="min-w-0">
           {ctl.parts.length > 0 && (
@@ -71,22 +79,26 @@ export function CadPartsTab() {
             </>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 lg:col-span-2 2xl:col-span-1">
           {ctl.parts.length > 0 && (
             <label className="flex min-h-9 items-center gap-2 rounded-md px-1 text-sm text-muted-foreground max-sm:min-h-11">
               <SelectAllCheckbox sel={sel} label="Select every part in the BOM" />
               <span>{sel.count ? `${sel.count} selected` : 'Select all'}</span>
             </label>
           )}
+          <Button asChild variant="outline" title="Control Kit scans an Onshape assembly into a priced BOM. Attaching it here arrives once linking is enabled.">
+            <a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer"><ExternalLink /> Import from Control Kit<span className="sr-only"> (opens in a new tab)</span></a>
+          </Button>
           <Button variant="outline" onClick={() => ctl.setShowInvoice(true)}><Sparkles /> Import invoice</Button>
           <Button onClick={() => ctl.setEditing('new')}><Plus /> Add part</Button>
         </div>
+        <p className="text-xs text-muted-foreground lg:col-span-2 2xl:col-span-3">Control Kit makes a priced BOM from an Onshape assembly. Attach a Control Kit BOM here once linking is enabled; until then, it opens in a new tab.</p>
       </Reveal>
 
       {!ctl.loaded ? <Skeleton className="h-64" /> : ctl.grouped.length ? ctl.grouped.map(({ section, items }) => {
-        const sub = items.reduce((a: number, p: any) => a + (Number(p.quantity) || 0) * (Number(p.unit_cost) || 0), 0);
+        const sub = bomCost(items);
         return (
-          <Section key={section} title={section} description={`${items.length} part${items.length === 1 ? '' : 's'}`} action={<span className="text-sm tabular-nums text-muted-foreground">{money(sub)}</span>}>
+          <Section key={section} title={section} description={`${items.length} part${items.length === 1 ? '' : 's'}`} action={<span className="text-sm tabular-nums text-muted-foreground">{subtotalText(sub)}</span>}>
             <div className="overflow-x-auto rounded-xl border border-border">
               <Table>
                 <TableHeader>
