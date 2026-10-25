@@ -1,9 +1,12 @@
 // Modern CAD (phase 8d), rebuilt on the shadcn kit over the shared useCad
 // hooks (same /api/cad/* endpoints, review workflow and ownership rules as
-// Legacy). One page with route-driven tabs: Overview, Onshape docs, Design
-// reviews, 3D snapshots and the Parts list (BOM).
+// Legacy). One page with route-driven tabs: Overview, the Parts list (BOM),
+// Onshape docs, Design reviews and 3D snapshots.
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowRight, Box, ClipboardCheck, Clock, ExternalLink, FileBox, Layers, Link2, MoreHorizontal, Package, Plus, Trash2, Upload } from 'lucide-react';
+import { AlertCircle, ArrowRight, Box, ClipboardCheck, Clock, ExternalLink, FileBox, Layers, Link2, MoreHorizontal, Package, Plus, Trash2, Upload, X } from 'lucide-react';
+import { CONTROL_KIT_ICON, CONTROL_KIT_URL } from '../../../utils/controlKit';
+import { money } from '../../../utils/cadCost';
 import { useRecordFocus } from '../../hooks/useRecordFocus';
 import { cn } from '../../../components/cn';
 import {
@@ -21,12 +24,13 @@ import { CadReviewsTab } from './CadReviewsTab';
 import { CadSnapshotsTab } from './CadSnapshotsTab';
 import { CadPartsTab } from './CadPartsTab';
 
-const TABS = [
+// The Parts list is the main work surface after Overview. Routes keep their names, so old links still work.
+export const TABS = [
   { id: 'cad', label: 'Overview', icon: Box },
+  { id: 'cad-parts', label: 'Parts list', icon: Package },
   { id: 'cad-docs', label: 'Onshape docs', icon: FileBox },
   { id: 'cad-reviews', label: 'Design reviews', icon: ClipboardCheck },
   { id: 'cad-snapshots', label: 'Snapshots', icon: Layers },
-  { id: 'cad-parts', label: 'Parts list', icon: Package },
 ];
 
 export function CadPage({ activeTab, currentUser, isAdmin }: { activeTab: string; currentUser?: any; isAdmin: boolean }) {
@@ -43,11 +47,11 @@ export function CadPage({ activeTab, currentUser, isAdmin }: { activeTab: string
           </TabsList>
         </Tabs>
       </PageHeader>
-      {tab === 'cad' && <Overview onNavigate={(p) => navigate(p)} />}
+      {tab === 'cad' && <Overview userId={currentUser?.id} onNavigate={(p) => navigate(p)} />}
+      {tab === 'cad-parts' && <CadPartsTab />}
       {tab === 'cad-docs' && <DocsTab />}
       {tab === 'cad-reviews' && <CadReviewsTab currentUser={currentUser} isAdmin={isAdmin} />}
       {tab === 'cad-snapshots' && <CadSnapshotsTab currentUser={currentUser} isAdmin={isAdmin} />}
-      {tab === 'cad-parts' && <CadPartsTab />}
     </Page>
   );
 }
@@ -58,18 +62,51 @@ export function CadPage({ activeTab, currentUser, isAdmin }: { activeTab: string
 
 const KIND_ICON: Record<string, typeof Box> = { review: ClipboardCheck, snapshot: Layers, part: Package, doc: FileBox };
 
-function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
+/** "$120.50 · 2 of 3 priced", or "No prices yet" when no part has a cost, so unpriced parts never read as $0.00. */
+export function partsHint(data: { partsCount?: number; partsTotalCost?: number; partsPriced?: number }) {
+  const lines = Number(data.partsCount) || 0;
+  if (!lines) return undefined;
+  // An older server without priced counts: show its total as before.
+  if (data.partsPriced === undefined) return `${money(Number(data.partsTotalCost) || 0)} total`;
+  if (!data.partsPriced) return 'No prices yet';
+  return `${money(Number(data.partsTotalCost) || 0)} · ${data.partsPriced} of ${lines} priced`;
+}
+
+const promoKey = (userId: unknown) => `cp-cad-control-kit-promo-dismissed:${userId ?? 'anon'}`;
+
+/** One dismissible card on the CAD Overview only; dismissing hides it for this person on this device. */
+function ControlKitPromo({ userId }: { userId?: number }) {
+  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(promoKey(userId)) === '1'; } catch { return false; } });
+  if (dismissed) return null;
+  const dismiss = () => { setDismissed(true); try { localStorage.setItem(promoKey(userId), '1'); } catch { /* storage blocked: hidden for this visit */ } };
+  return (
+    <Reveal className="mb-8 flex items-start gap-4 rounded-2xl border border-border bg-card p-5">
+      <img src={CONTROL_KIT_ICON} alt="" aria-hidden className="size-10 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <p className="font-medium">Make a BOM from this CAD</p>
+        <p className="mt-1 text-sm text-muted-foreground">Scan this assembly in Onshape with Control Kit and bring the priced BOM back here.</p>
+        <Button asChild variant="outline" size="sm" className="mt-3 max-sm:h-11">
+          <a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer">Open Control Kit <ExternalLink /><span className="sr-only"> (opens in a new tab)</span></a>
+        </Button>
+      </div>
+      <Button variant="ghost" size="icon-sm" onClick={dismiss} aria-label="Dismiss the Control Kit card" className="max-sm:size-11"><X /></Button>
+    </Reveal>
+  );
+}
+
+function Overview({ onNavigate, userId }: { onNavigate: (path: string) => void; userId?: number }) {
   const { data, loading } = useCadDashboard();
   if (loading) return <div className="grid grid-cols-2 gap-6 lg:grid-cols-4" aria-busy="true">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}</div>;
   if (!data) return <EmptyState icon={Box} title="Couldn't load the CAD dashboard" description="Try refreshing the page." />;
   return (
     <>
       <Reveal className="mb-8 grid grid-cols-2 gap-6 border-b border-border pb-6 lg:grid-cols-4">
+        <Stat icon={Package} label="Parts" value={<AnimatedValue value={data.partsCount} />} hint={partsHint(data)} onClick={() => onNavigate('/cad-parts')} />
         <Stat icon={FileBox} label="Onshape docs" value={<AnimatedValue value={data.docsCount} />} onClick={() => onNavigate('/cad-docs')} />
         <Stat icon={ClipboardCheck} label="Pending reviews" value={<AnimatedValue value={data.pendingReviews} />} tone={data.pendingReviews > 0 ? 'bad' : 'default'} onClick={() => onNavigate('/cad-reviews')} />
         <Stat icon={Layers} label="Snapshots" value={<AnimatedValue value={data.snapshotsCount} />} onClick={() => onNavigate('/cad-snapshots')} />
-        <Stat icon={Package} label="Parts" value={<AnimatedValue value={data.partsCount} />} hint={`$${Number(data.partsTotalCost || 0).toFixed(2)} total`} onClick={() => onNavigate('/cad-parts')} />
       </Reveal>
+      <ControlKitPromo userId={userId} />
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <Section title="Review queue" description="Designs waiting for an admin.">
           {data.needsAttention?.length ? (
@@ -89,10 +126,10 @@ function Overview({ onNavigate }: { onNavigate: (path: string) => void }) {
             </Stagger>
           ) : <EmptyState icon={ClipboardCheck} title="Queue is clear" description="Nothing is waiting for review." className="py-6" />}
           <div className="mt-4 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => onNavigate('/cad-parts')} className="max-sm:h-11"><Plus /> Add a part</Button>
             <Button variant="outline" size="sm" onClick={() => onNavigate('/cad-docs')} className="max-sm:h-11"><Link2 /> Link a doc</Button>
             <Button variant="outline" size="sm" onClick={() => onNavigate('/cad-reviews')} className="max-sm:h-11"><ClipboardCheck /> Submit a design</Button>
             <Button variant="outline" size="sm" onClick={() => onNavigate('/cad-snapshots')} className="max-sm:h-11"><Upload /> Upload a snapshot</Button>
-            <Button variant="outline" size="sm" onClick={() => onNavigate('/cad-parts')} className="max-sm:h-11"><Plus /> Add a part</Button>
           </div>
         </Section>
         <Section title="Recent activity" description="Latest CAD work across the team.">

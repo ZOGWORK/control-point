@@ -20,6 +20,7 @@ import {
   Sparkles, MessageSquareHeart, Compass, Check, Menu, Layers, Plus, UserPlus, LogIn, ExternalLink,
 } from 'lucide-react';
 import { CONTROL_SCOUT_ICON, CONTROL_SCOUT_URL } from '../utils/controlScout';
+import { CONTROL_KIT_ICON, CONTROL_KIT_TAGLINE, CONTROL_KIT_URL } from '../utils/controlKit';
 import { cn } from '../components/cn';
 import { assetUrl } from '../services/api';
 import { useTheme } from '../hooks/useTheme';
@@ -449,9 +450,10 @@ function SidebarContent(props: ModernShellProps & {
         )}
       </nav>
 
-      {/* The sister app: FTC stats and predictions, same account. */}
+      {/* The sister apps: FTC stats and predictions (same account), and Onshape BOMs. External links, never nav items. */}
       <div className="px-2 pb-1">
         <ControlScoutRow collapsed={collapsed} />
+        <ControlKitRow collapsed={collapsed} />
       </div>
 
       <div className="border-t border-line p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
@@ -463,12 +465,22 @@ function SidebarContent(props: ModernShellProps & {
 
 /** "Control Scout" in the sidebar, with its icon; opens controlscout.org in a new tab. */
 function ControlScoutRow({ collapsed }: { collapsed: boolean }) {
+  return <SisterAppRow collapsed={collapsed} href={CONTROL_SCOUT_URL} icon={CONTROL_SCOUT_ICON} label="Control Scout" />;
+}
+
+/** "Control Kit" in the sidebar, with its icon; opens control-kit.pages.dev in a new tab. */
+function ControlKitRow({ collapsed }: { collapsed: boolean }) {
+  return <SisterAppRow collapsed={collapsed} href={CONTROL_KIT_URL} icon={CONTROL_KIT_ICON} label="Control Kit" tip={CONTROL_KIT_TAGLINE} />;
+}
+
+/** An external sister-app link: icon only with a tooltip when collapsed, never an active highlight. */
+function SisterAppRow({ collapsed, href, icon, label, tip }: { collapsed: boolean; href: string; icon: string; label: string; tip?: string }) {
   const link = (
-    <a href={CONTROL_SCOUT_URL} target="_blank" rel="noopener noreferrer" className={rowClass(false, collapsed)} aria-label={collapsed ? 'Control Scout (opens in a new tab)' : undefined}>
-      <img src={CONTROL_SCOUT_ICON} alt="" aria-hidden className="size-4 shrink-0 rounded-[4px]" />
+    <a href={href} target="_blank" rel="noopener noreferrer" className={rowClass(false, collapsed)} aria-label={collapsed ? `${label} (opens in a new tab)` : undefined} title={!collapsed ? tip : undefined}>
+      <img src={icon} alt="" aria-hidden className="size-4 shrink-0 rounded-[4px]" />
       {!collapsed && (
         <>
-          <span className="flex-1 truncate">Control Scout</span>
+          <span className="flex-1 truncate">{label}</span>
           <ExternalLink className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
           <span className="sr-only"> (opens in a new tab)</span>
         </>
@@ -479,7 +491,7 @@ function ControlScoutRow({ collapsed }: { collapsed: boolean }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{link}</TooltipTrigger>
-      <TooltipContent side="right">Control Scout</TooltipContent>
+      <TooltipContent side="right">{tip ? <><span className="font-medium">{label}</span> · {tip}</> : label}</TooltipContent>
     </Tooltip>
   );
 }
