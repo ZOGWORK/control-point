@@ -118,9 +118,11 @@ describe("a reply that only says Checking…", () => {
     const note = /I couldn't find anything current on that\. FIRST's event site \(https:\/\/ftc-events\.firstinspires\.org\) and FTC Scout \(https:\/\/ftcscout\.org\)/;
     expect(r.saved).toMatch(note);
     expect(r.shown).toMatch(note);
-    // No line of the saved reply is anything but progress or the note.
+    // No line of the saved reply is anything but progress, the note, or (a
+    // stats question) the one line pointing to Control Scout.
     const lines = r.saved.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    expect(lines.filter((l) => !/^(Checking|Looking)\b/.test(l) && !note.test(l))).toEqual([]);
+    const scoutLine = /^_For detailed team, event and match overviews and predictions, see \[Control Scout\]\(https:\/\/controlscout\.org\)\._$/;
+    expect(lines.filter((l) => !/^(Checking|Looking)\b/.test(l) && !note.test(l) && !scoutLine.test(l))).toEqual([]);
   });
 });
 
@@ -167,5 +169,34 @@ describe("Suggest tags in the task editor", () => {
     expect((await t.post("/api/tasks/suggest-tags", { title: "x" }, session)).status).toBe(400);
     gemini.script = ["Sure! I'd tag this as intake work."];
     expect((await t.post("/api/tasks/suggest-tags", { title: "Prototype a roller intake" }, session)).status).toBe(502);
+  });
+});
+
+describe("Sister-app suggestions (server/suiteSuggestions.ts)", () => {
+  it("a stats question ends with one line to Control Scout, shown and saved", async () => {
+    gemini.script = ["Team 6980 hasn't played an event yet this season, so there's no OPR to show."];
+    const r = await ask("What's team 6980's OPR this season?");
+    expect(r.status).toBe(200);
+    const line = /_For detailed team, event and match overviews and predictions, see \[Team 6980 on Control Scout\]\(https:\/\/controlscout\.org\/teams\/6980\?season=\d{4}\)\._/;
+    expect(r.shown).toMatch(line);
+    expect(r.saved).toMatch(line);
+    expect(r.saved.match(/controlscout\.org/g)).toHaveLength(1);
+    expect(r.saved).not.toMatch(/control-kit/);
+  });
+
+  it("a CAD question ends with one line to Control Kit for Onshape", async () => {
+    gemini.script = ["Start with the drivetrain: list each motor, wheel and bearing in the Parts list."];
+    const r = await ask("What parts do we need to buy for the Onshape drivetrain?");
+    const line = "_For a BOM, buy list and STEP files straight from your Onshape assembly, try [Control Kit for Onshape](https://control-kit.pages.dev)._";
+    expect(r.shown).toContain(line);
+    expect(r.saved).toContain(line);
+    expect(r.saved).not.toMatch(/controlscout\.org/);
+  });
+
+  it("an unrelated question gets neither", async () => {
+    gemini.script = ["Done: bring snacks on Friday."];
+    const r = await ask("Remind me to bring snacks on Friday");
+    expect(r.saved).toBe("Done: bring snacks on Friday.");
+    expect(r.shown).not.toMatch(/Control (Scout|Kit)/);
   });
 });

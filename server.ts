@@ -73,6 +73,7 @@ import { normalizeBrunoTask, normalizeTaskUpdate } from "./src/utils/brunoTasks.
 import { byteRange } from "./server/byteRange.js";
 import { closeOpenFence, createLookupHold, extractLookupBlocks, followUpPrompt, machineBlockKinds, nothingFoundNote, progressOnly, PROGRESS_ONLY_PROMPT, resolveRetry, runLookups, saidNothing, unfinishedCheckNote } from "./server/brunoLookup.js";
 import { webAppendix } from "./server/productLinks.js";
+import { suiteSuggestion } from "./server/suiteSuggestions.js";
 import { linkedPagesContext } from "./server/linkedPages.js";
 import { fetchAvatarImage } from "./server/avatarFetch.js";
 import { dropUnprovenPasswords, hasUnprovenPassword, isProvenHash, proveHash, provePasswords } from "./server/provenPasswords.js";
@@ -13933,6 +13934,28 @@ NOTES>>>`;
     return { text: src.replace(SWITCH_BLOCK_RE, "").trim(), switchTo };
   }
 
+  // One line pointing to Control Scout (stats) or Control Kit (CAD) under an
+  // answer about that subject (server/suiteSuggestions.ts). Links the team or
+  // event Bruno looked up when there is exactly one; never fails a reply.
+  async function suiteLineFor(rawText: string, shown: string, messages: { role: string; text: string }[], teamId: number | null): Promise<string> {
+    try {
+      // A reply that is still only "Checking …" gets the unfinished note instead.
+      if (progressOnly(shown)) return "";
+      const latest = messages[messages.length - 1];
+      if (latest?.role !== "user") return "";
+      const teamRow = teamId ? ((await dbGet("SELECT ftc_team_number FROM teams WHERE id = ?", teamId)) as any) : null;
+      return suiteSuggestion({
+        question: typedText(String(latest.text ?? "")),
+        reply: String(rawText || ""),
+        history: messages.slice(0, -1).map((m) => String(m.text || "")),
+        season: currentFtcSeason(),
+        lookedUpTeams: extractScoutBlock(String(rawText || "")).numbers,
+        lookedUpEvent: extractScoutEventBlock(String(rawText || "")).code,
+        ownTeam: parseInt(teamRow?.ftc_team_number, 10) || null,
+      });
+    } catch (err) { console.error("[bruno] suite suggestion failed:", err); return ""; }
+  }
+
   /**
    * Bruno's scouting lookups: when a reply ends with a ```scout-team /
    * ```scout-event request, fetch the stats and return a summary to append
@@ -14479,6 +14502,7 @@ NOTES>>>`;
           const mem = extractRememberBlocks(fullText);
           fullText = mem.text;
           const scouting = await scoutingAppendix(fullText, auth.teamId, streamAbort.signal).catch(() => "");
+          const suite = await suiteLineFor(fullText, stripActionBlocks(fullText), messages, auth.teamId);
           // Stopped during the lookups: the user has the reply they saw; nothing more is written or saved.
           if (streamAbort.signal.aborted) { res.end(); return; }
           // The note streams with the scouting appendix below (written once).
@@ -14487,7 +14511,7 @@ NOTES>>>`;
           const productLinks = await webAppendix(webSources, undefined, undefined, streamAbort.signal);
           // Stopped while the product pages were checked: nothing more is written or saved.
           if (streamAbort.signal.aborted) { res.end(); return; }
-          const appendix = productLinks + (await saveMemories(mem.facts)) + scouting + (await referencesFor(fullText));
+          const appendix = productLinks + (await saveMemories(mem.facts)) + scouting + suite + (await referencesFor(fullText));
           // Last word: never save a reply that is still only "Checking …".
           // An unfinished block before it is closed first, or the chat would
           // hide the note along with the block.
@@ -14559,11 +14583,12 @@ NOTES>>>`;
       const memNS = extractRememberBlocks(String(result || ""));
       result = memNS.text;
       const scoutingNS = await scoutingAppendix(String(result || ""), auth.teamId, nonStreamAbort.signal);
+      const suiteNS = await suiteLineFor(String(result || ""), stripActionBlocks(String(result || "")), messages, auth.teamId);
       if (nonStreamAbort.signal.aborted) return;
       result = stripModelRefs(String(result || ""));
       const productLinksNS = await webAppendix(webSourcesNS, undefined, undefined, nonStreamAbort.signal);
       if (nonStreamAbort.signal.aborted) return;
-      let appendixNS = productLinksNS + (await saveMemories(memNS.facts)) + scoutingNS + (await referencesFor(String(result || "")));
+      let appendixNS = productLinksNS + (await saveMemories(memNS.facts)) + scoutingNS + suiteNS + (await referencesFor(String(result || "")));
       const shownNS = stripActionBlocks(String(result || ""));
       // Last word: never save a reply that is still only "Checking …" (an
       // unfinished block before it is closed first, so the note shows).

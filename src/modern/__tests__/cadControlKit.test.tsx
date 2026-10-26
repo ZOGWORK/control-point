@@ -92,9 +92,34 @@ describe('CAD remodel', () => {
     expect(screen.queryByText('Make a BOM from this CAD')).toBeNull();
   });
 
-  it('the card appears on the CAD Overview only', async () => {
-    setup('cad-docs');
-    await screen.findByRole('tab', { name: 'Onshape docs' });
+  it.each([
+    ['cad-docs', 'Turn these Onshape docs into a BOM'],
+    ['cad-reviews', 'Check what a design needs before it is approved'],
+    ['cad-snapshots', 'Get STEP files and a parts list from Onshape'],
+  ])('%s has its own Control Kit card, linking out in a new tab', async (tab, title) => {
+    setup(tab);
+    const card = (await screen.findByText(title)).closest('div')!.parentElement!;
+    const link = within(card).getByRole('link', { name: /Open Control Kit/ });
+    expect(link).toHaveAttribute('href', 'https://control-kit.pages.dev');
+    expect(link).toHaveAttribute('target', '_blank');
     expect(screen.queryByText('Make a BOM from this CAD')).toBeNull();
+  });
+
+  it('the Parts list keeps its Import button instead of a card', async () => {
+    setup('cad-parts');
+    await screen.findByRole('link', { name: /Import from Control Kit/ });
+    expect(screen.queryByRole('link', { name: /Open Control Kit/ })).toBeNull();
+  });
+
+  it('dismissing the card on one CAD tab hides it on every tab', async () => {
+    setup('cad-reviews');
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss the Control Kit card' }));
+    expect(screen.queryByRole('link', { name: /Open Control Kit/ })).toBeNull();
+    for (const tab of ['cad', 'cad-docs', 'cad-snapshots']) {
+      cleanup();
+      setup(tab);
+      await screen.findByRole('tab', { name: 'Overview' });
+      expect(screen.queryByRole('link', { name: /Open Control Kit/ })).toBeNull();
+    }
   });
 });
