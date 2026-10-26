@@ -2,10 +2,10 @@
 // hooks (same /api/cad/* endpoints, review workflow and ownership rules as
 // Legacy). One page with route-driven tabs: Overview, the Parts list (BOM),
 // Onshape docs, Design reviews and 3D snapshots.
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, ArrowRight, Box, ClipboardCheck, Clock, ExternalLink, FileBox, Layers, Link2, MoreHorizontal, Package, Plus, Trash2, Upload, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, Box, ClipboardCheck, Clock, ExternalLink, FileBox, Layers, Link2, MoreHorizontal, Package, Plus, Trash2, Upload } from 'lucide-react';
 import { CONTROL_KIT_ICON, CONTROL_KIT_URL } from '../../../utils/controlKit';
+import { CONTROL_KIT_SUGGESTION, SisterAppSuggestion, sisterAppKey } from '../../ui/sisterApp';
 import { money } from '../../../utils/cadCost';
 import { useRecordFocus } from '../../hooks/useRecordFocus';
 import { cn } from '../../../components/cn';
@@ -49,6 +49,7 @@ export function CadPage({ activeTab, currentUser, isAdmin }: { activeTab: string
       </PageHeader>
       {tab === 'cad' && <Overview userId={currentUser?.id} onNavigate={(p) => navigate(p)} />}
       {tab === 'cad-parts' && <CadPartsTab />}
+      {tab !== 'cad' && <ControlKitPromo userId={currentUser?.id} tab={tab} />}
       {tab === 'cad-docs' && <DocsTab />}
       {tab === 'cad-reviews' && <CadReviewsTab currentUser={currentUser} isAdmin={isAdmin} />}
       {tab === 'cad-snapshots' && <CadSnapshotsTab currentUser={currentUser} isAdmin={isAdmin} />}
@@ -72,25 +73,21 @@ export function partsHint(data: { partsCount?: number; partsTotalCost?: number; 
   return `${money(Number(data.partsTotalCost) || 0)} · ${data.partsPriced} of ${lines} priced`;
 }
 
-const promoKey = (userId: unknown) => `cp-cad-control-kit-promo-dismissed:${userId ?? 'anon'}`;
+// The Parts list has its own "Import from Control Kit" button, so it is the one tab without the card.
+const KIT_CARD: Record<string, { title: string; body: string }> = {
+  cad: { title: 'Make a BOM from this CAD', body: 'Scan this assembly in Onshape with Control Kit and bring the priced BOM back here.' },
+  'cad-docs': { title: 'Turn these Onshape docs into a BOM', body: 'Control Kit for Onshape scans an assembly into a BOM, a buy list, a make list and STEP files.' },
+  'cad-reviews': { title: 'Check what a design needs before it is approved', body: 'Control Kit for Onshape lists every part to buy, print or machine for an assembly, with buy links.' },
+  'cad-snapshots': { title: 'Get STEP files and a parts list from Onshape', body: 'Control Kit for Onshape exports STEP files and a BOM with buy links for the assembly behind a snapshot.' },
+};
 
-/** One dismissible card on the CAD Overview only; dismissing hides it for this person on this device. */
-function ControlKitPromo({ userId }: { userId?: number }) {
-  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem(promoKey(userId)) === '1'; } catch { return false; } });
-  if (dismissed) return null;
-  const dismiss = () => { setDismissed(true); try { localStorage.setItem(promoKey(userId), '1'); } catch { /* storage blocked: hidden for this visit */ } };
+/** One dismissible Control Kit card per CAD tab (not the Parts list); dismissing it anywhere hides it on every tab, for this person on this device. */
+export function ControlKitPromo({ userId, tab = 'cad' }: { userId?: number; tab?: string }) {
+  const copy = KIT_CARD[tab];
+  if (!copy) return null;
   return (
-    <Reveal className="mb-8 flex items-start gap-4 rounded-2xl border border-border bg-card p-5">
-      <img src={CONTROL_KIT_ICON} alt="" aria-hidden className="size-10 shrink-0 rounded-lg" />
-      <div className="min-w-0 flex-1">
-        <p className="font-medium">Make a BOM from this CAD</p>
-        <p className="mt-1 text-sm text-muted-foreground">Scan this assembly in Onshape with Control Kit and bring the priced BOM back here.</p>
-        <Button asChild variant="outline" size="sm" className="mt-3 max-sm:h-11">
-          <a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer">Open Control Kit <ExternalLink /><span className="sr-only"> (opens in a new tab)</span></a>
-        </Button>
-      </div>
-      <Button variant="ghost" size="icon-sm" onClick={dismiss} aria-label="Dismiss the Control Kit card" className="max-sm:size-11"><X /></Button>
-    </Reveal>
+    <SisterAppSuggestion storageKey={sisterAppKey(CONTROL_KIT_SUGGESTION, userId)} icon={CONTROL_KIT_ICON} href={CONTROL_KIT_URL}
+      title={copy.title} body={copy.body} cta="Open Control Kit" app="Control Kit" />
   );
 }
 

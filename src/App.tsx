@@ -2316,7 +2316,7 @@ export default function App() {
         {/* Inbox is a Modern page; Legacy keeps its bell dropdown. */}
         <Route path="/inbox" element={<InboxPage notifications={notifications} actions={notificationActions} onOpenChannel={(id) => setActiveChannelId(id)} />} />
         <Route path="/stats" element={<TeamStatsPage teamId={currentUser?.team_id} memberId={currentUser?.id} memberName={currentUser?.name} canManage={hasPerm('manage_members')} />} />
-        <Route path="/predict" element={<PredictPage />} />
+        <Route path="/predict" element={<PredictPage userId={currentUser?.id} />} />
         <Route path="/teams" element={<PeoplePage {...viewProps} hasPerm={hasPerm} />} />
         {/* Stable links to one record, re-checked on every open. */}
         <Route path="/t/:teamId/:type/:id" element={<RefOpen activeTeamId={currentUser?.team_id} onSwitchTeam={(id) => void handleSwitchTeam(id)} />} />
