@@ -73,7 +73,7 @@ describe('CAD remodel', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(screen.getByRole('button', { name: /Import invoice/ })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /Add part/ }).length).toBeGreaterThan(0);
-    expect(screen.getByText(/once linking is enabled/)).toBeInTheDocument();
+    expect(screen.getByText(/press Send: the parts land here/)).toBeInTheDocument();
   });
 
   it('the Overview card links to Control Kit externally and stays dismissed for that person', async () => {

@@ -91,6 +91,7 @@ import { registerNotebookFileRoutes } from "./server/notebookFiles.js";
 import { NotebookStore, registerNotebookRoutes } from "./server/notebook.js";
 import { registerNotebookReviewRoutes } from "./server/notebookReviews.js";
 import { registerChecklistRoutes } from "./server/checklists.js";
+import { createControlKitLink, deleteGrantsSql } from "./server/controlKitLink.js";
 import { registerStickyNoteRoutes } from "./server/stickyNotes.js";
 import { isRefType, resolveRef, type RefDeps } from "./server/refs.js";
 import { createRefsFilter, refsBlock, stripModelRefs, validateRefs } from "./server/brunoRefs.js";
@@ -2315,7 +2316,11 @@ async function startServer() {
     // Camera (QR check-in, video calls), microphone and screen share are used
     // by the app itself; nothing else is.
     res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()");
-    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    // The Control Kit consent page opens in Control Kit's popup, which posts
+    // back to its opener once linked: same-origin here would cut that tie.
+    // Google/Discord/GitHub sign-in from that page runs in a window of its own
+    // (utils/controlKitConnect), so the popup never leaves this page either.
+    res.setHeader("Cross-Origin-Opener-Policy", /^\/connect\/control-kit\/?$/i.test(_req.path) ? "unsafe-none" : "same-origin");
     next();
   });
 
@@ -2385,6 +2390,19 @@ async function startServer() {
   });
   app.use("/internal", sharedAccounts.internalRouter());
   sharedAccounts.registerStartRoute(app);
+  // Control Kit link (server/controlKitLink.ts): the token exchange and the
+  // bearer API are server to server (the Control Kit Worker, no client header
+  // or cookie), so they sit before the /api session and CSRF guard too, with
+  // their own body limits (a BOM can be 12 MB). The consent page's own calls
+  // are registered with the CAD routes, behind the guard.
+  const controlKit = createControlKitLink({
+    dbGet, dbAll, dbRun, dbBatchResults, env: process.env,
+    requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
+    // Declared further down; only called per request, after startup.
+    storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
+    appUrl: (req) => (process.env.APP_URL || "").replace(/\/$/, "") || getBaseUrl(req),
+  });
+  controlKit.registerBearerRoutes(app);
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
 
@@ -3504,12 +3522,12 @@ async function startServer() {
   const OAUTH_PROVIDER_STUB = /^http:\/\/127\.0\.0\.1:\d{2,5}$/.test(process.env.OAUTH_PROVIDER_STUB || "") ? process.env.OAUTH_PROVIDER_STUB! : null;
   const providerUrl = (real: string) => (OAUTH_PROVIDER_STUB ? OAUTH_PROVIDER_STUB + new URL(real).pathname : real);
 
-  const oauthStates = new Map<string, { expiry: number; intent: string; provider: string; returnTo?: string; memberId?: number; scoutState?: string }>(); // state -> {expiry, intent, provider}
+  const oauthStates = new Map<string, { expiry: number; intent: string; provider: string; returnTo?: string; memberId?: number; scoutState?: string; popup?: boolean }>(); // state -> {expiry, intent, provider}
   // OAuth state is bound to the browser that started the flow (a short-lived
   // HttpOnly cookie), so a victim can't be fed someone else's callback URL
   // (login CSRF). Expired entries are swept on every start.
   const OAUTH_STATE_COOKIE = "cp_oauth_state";
-  function startOAuthState(req: any, res: any, state: string, entry: { expiry: number; intent: string; provider: string; returnTo?: string; memberId?: number; scoutState?: string }) {
+  function startOAuthState(req: any, res: any, state: string, entry: { expiry: number; intent: string; provider: string; returnTo?: string; memberId?: number; scoutState?: string; popup?: boolean }) {
     const now = Date.now();
     for (const [k, v] of oauthStates) if (v.expiry < now) oauthStates.delete(k);
     oauthStates.set(state, entry);
@@ -3629,7 +3647,7 @@ async function startServer() {
     try {
       if (rt && isAllowedOAuthReturnOrigin(rt)) returnTo = new URL(rt).href.replace(/\/$/, '');
     } catch { /* invalid URL — fall back to API host */ }
-    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'google', returnTo, scoutState: scoutStateFrom(req) });
+    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'google', returnTo, scoutState: scoutStateFrom(req), popup: req.query.popup === '1' });
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
       redirect_uri: getOAuthRedirectUri(req, 'google'),
@@ -3715,7 +3733,7 @@ async function startServer() {
   // passes its validated state along, and the callback hands off to Scout instead of logging in here.
   const scoutStateFrom = (req: any): string | undefined => (isHandoffState(req.query.scout_state) ? req.query.scout_state : undefined);
 
-  async function finishOAuthLogin(provider: string, providerSub: string, rawEmail: string, name: string, avatarUrl: string | null, intent: string, res: any, returnTo?: string, scoutState?: string) {
+  async function finishOAuthLogin(provider: string, providerSub: string, rawEmail: string, name: string, avatarUrl: string | null, intent: string, res: any, returnTo?: string, scoutState?: string, popup?: boolean) {
     // Scout's sign-in: the provider verified this email; vouch for it to Scout (no Control Point session).
     if (scoutState && isScoutVia(provider)) return sharedAccounts.completeOAuthHandoff(res, provider, rawEmail, scoutState);
     const idColumn = OAUTH_PROVIDERS[provider].idColumn;
@@ -3753,7 +3771,9 @@ async function startServer() {
     // The session goes straight into the HttpOnly cookie on this top-level
     // redirect — never into the URL (history, logs, Referer).
     res.append("Set-Cookie", sessionCookie(sessionId, requestIsHttps(res.req)));
-    res.redirect(`${base}/?oauth=ok`);
+    // popup=1: a sign-in Control Kit's consent page opened in its own window
+    // (utils/controlKitConnect); that window tells the consent page and closes.
+    res.redirect(`${base}/?oauth=ok${popup ? '&popup=1' : ''}`);
   }
 
   // Shared completion step for every OAuth provider: the identity is verified,
@@ -3875,7 +3895,7 @@ async function startServer() {
     try {
       if (rt && isAllowedOAuthReturnOrigin(rt)) returnTo = new URL(rt).href.replace(/\/$/, '');
     } catch { /* invalid URL — fall back to API host */ }
-    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'discord', returnTo, scoutState: scoutStateFrom(req) });
+    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'discord', returnTo, scoutState: scoutStateFrom(req), popup: req.query.popup === '1' });
     const params = new URLSearchParams({
       client_id: DISCORD_CLIENT_ID,
       redirect_uri: getOAuthRedirectUri(req, 'discord'),
@@ -3919,7 +3939,7 @@ async function startServer() {
       const avatarUrl = profile.avatar
         ? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
         : null;
-      await finishOAuthLogin('discord', String(profile.id), profile.email, name, avatarUrl, pending.intent || 'login', res, pending.returnTo, pending.scoutState);
+      await finishOAuthLogin('discord', String(profile.id), profile.email, name, avatarUrl, pending.intent || 'login', res, pending.returnTo, pending.scoutState, pending.popup);
     } catch (error) {
       console.error("Discord OAuth error:", error);
       res.redirect("/?oauth_error=oauth_failed");
@@ -3943,7 +3963,7 @@ async function startServer() {
     try {
       if (rt && isAllowedOAuthReturnOrigin(rt)) returnTo = new URL(rt).href.replace(/\/$/, '');
     } catch { /* invalid URL — fall back to API host */ }
-    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'github', returnTo, scoutState: scoutStateFrom(req) });
+    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: 'github', returnTo, scoutState: scoutStateFrom(req), popup: req.query.popup === '1' });
     const params = new URLSearchParams({
       client_id: GITHUB_CLIENT_ID,
       redirect_uri: getOAuthRedirectUri(req, 'github'),
@@ -3988,7 +4008,7 @@ async function startServer() {
       }
       const name = ghUser.name || ghUser.login || "";
       const avatarUrl = ghUser.avatar_url || null;
-      await finishOAuthLogin('github', String(ghUser.id), primary.email, name, avatarUrl, pending.intent || 'login', res, pending.returnTo, pending.scoutState);
+      await finishOAuthLogin('github', String(ghUser.id), primary.email, name, avatarUrl, pending.intent || 'login', res, pending.returnTo, pending.scoutState, pending.popup);
     } catch (error) {
       console.error("GitHub OAuth error:", error);
       res.redirect("/?oauth_error=oauth_failed");
@@ -4037,7 +4057,7 @@ async function startServer() {
         return res.redirect(`${pending.returnTo || ''}/?oauth_error=email_unverified`);
       }
 
-      await finishOAuthLogin('google', String(profile.sub), profile.email, profile.name || '', profile.picture || null, intent, res, pending.returnTo, pending.scoutState);
+      await finishOAuthLogin('google', String(profile.sub), profile.email, profile.name || '', profile.picture || null, intent, res, pending.returnTo, pending.scoutState, pending.popup);
     } catch (error) {
       console.error("Google OAuth error:", error);
       res.redirect("/?oauth_error=oauth_failed");
@@ -4743,6 +4763,8 @@ async function startServer() {
         { sql: `DELETE FROM sticky_notes WHERE member_id IN (${ph})`, args: ids },
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        // Control Kit links belong to the account's email: a later account with this address starts unlinked.
+        ...deleteGrantsSql(email),
       ];
       const results = await dbBatchResults(stmts);
       const rowsOf = (sql: string) => results[stmts.findIndex((s) => s.sql === sql)]?.rows || [];
@@ -4756,6 +4778,7 @@ async function startServer() {
       await dbBatch([
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        ...deleteGrantsSql(email),
       ]);
     }
     res.json({ ok: true });
@@ -5353,6 +5376,7 @@ async function startServer() {
       { sql: "DELETE FROM cad_reviews WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_snapshots WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_parts WHERE team_id = ?", args: [teamId] },
+      { sql: "DELETE FROM cad_imports WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_docs WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM checkin_sessions WHERE team_id = ?", args: [teamId] },
       // References teams without a cascade.
@@ -16324,6 +16348,9 @@ NOTES>>>`;
       if (err) return res.status(400).json({ error: err.message || "Upload failed" });
       next();
     });
+
+  // Control Kit consent, Connected apps, and a Control Kit import's details.
+  controlKit.registerSessionRoutes(app);
 
   // ================= CAD =================
   // Every route binds auth.teamId; cross-team access is rejected.
