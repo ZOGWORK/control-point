@@ -39,6 +39,8 @@ const MAX_FILES = 20;
 const TOKEN_PREFIX = "ckp_";
 /** An unfinished import whose claim is older than this was abandoned; a retry finishes it. */
 export const IMPORT_STALL_MS = 2 * 60 * 1000;
+/** A claim on an unfinished import: when it was taken (so it ages and sorts like a timestamp) plus who took it. */
+const newClaim = () => `${new Date().toISOString()}#${randomBytes(6).toString("hex")}`;
 
 export const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const hexColor = (v: unknown) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v.trim()) ? v.trim().toLowerCase() : null);
@@ -72,12 +74,14 @@ export function redirectWith(uri: string, params: Record<string, string>): strin
   return url.toString();
 }
 
-/** Control Kit's stable identity for a part: extra.identity, or the same document:element:part:configuration built from the line. */
+/** Control Kit's stable identity for a part: extra.identity, or the same document:element:part:configuration built from the line.
+ *  Never cut short: an identity over 500 characters (long configurations) is kept as its SHA-256, so two parts can't merge. */
 export function partKey(extra: any): string | null {
-  const identity = str(extra?.identity, 500);
-  if (identity) return identity;
+  const whole = (k: string) => (k.length <= 500 ? k : `sha256:${sha256(k)}`);
+  const identity = typeof extra?.identity === "string" ? extra.identity.trim() : "";
+  if (identity) return whole(identity);
   if (typeof extra?.documentId === "string" && typeof extra?.elementId === "string" && typeof extra?.partId === "string" && extra.partId) {
-    return `${extra.documentId}:${extra.elementId}:${extra.partId}:${typeof extra.configuration === "string" ? extra.configuration : ""}`.slice(0, 500);
+    return whole(`${extra.documentId}:${extra.elementId}:${extra.partId}:${typeof extra.configuration === "string" ? extra.configuration : ""}`);
   }
   return null;
 }
@@ -203,8 +207,17 @@ export function createControlKitLink(deps: ControlKitDeps) {
     };
   };
 
-  /** Store the bundle's inline files as CAD docs of the import; references are recorded as available in Control Kit. */
-  async function storeFiles(teamId: number, memberId: number, importId: number, body: any) {
+  /** Hold on to an import's claim a little longer; false once another request took it over. */
+  async function renewClaim(importId: number, claim: { value: string }) {
+    const next = newClaim();
+    const r = await dbRun("UPDATE cad_imports SET claimed_at = ? WHERE id = ? AND claimed_at = ? AND finished_at IS NULL", next, importId, claim.value);
+    if (r.changes) claim.value = next;
+    return r.changes > 0;
+  }
+
+  /** Store the bundle's inline files as CAD docs of the import; references are recorded as available in Control Kit.
+   *  The claim is renewed around every file, and a file is recorded only while it is still held: null once it was lost. */
+  async function storeFiles(teamId: number, memberId: number, importId: number, body: any, claim: { value: string }) {
     const out: any[] = [];
     let stored = 0;
     // A retry finishing a stalled import keeps the files that were already stored.
@@ -218,11 +231,19 @@ export function createControlKitLink(deps: ControlKitDeps) {
       if (already.has(name)) { out.push({ ...base, stored: true, url: already.get(name) }); stored++; continue; }
       const buffer = Buffer.from(content, "base64");
       if (base.sha256 && sha256(buffer) !== base.sha256.toLowerCase()) { out.push({ ...base, stored: false, note: "Not stored: its checksum did not match" }); continue; }
+      if (!(await renewClaim(importId, claim))) return null;
       try {
         const fileId = await deps.storeFile({ teamId, memberId, kind: "cad", filename: name, mimeType: base.mediaType, buffer });
         const url = deps.fileUrl(fileId);
-        await dbRun("INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id) VALUES (?, ?, ?, ?, ?, ?)",
-          teamId, name, url, memberId, new Date().toISOString(), importId);
+        // Recorded only by the claim's holder, renewing it in the same transaction.
+        const next = newClaim();
+        const [held] = await deps.dbBatchResults([
+          { sql: "UPDATE cad_imports SET claimed_at = ? WHERE id = ? AND claimed_at = ? AND finished_at IS NULL", args: [next, importId, claim.value] },
+          { sql: "INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id) SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1",
+            args: [teamId, name, url, memberId, new Date().toISOString(), importId] },
+        ]);
+        if (!held.changes) return null;
+        claim.value = next;
         out.push({ ...base, sizeBytes: buffer.length, stored: true, url });
         stored++;
       } catch (e) {
@@ -236,12 +257,16 @@ export function createControlKitLink(deps: ControlKitDeps) {
     return { files: out, stored };
   }
 
-  /** Store the import's files, mark it finished and answer. Only the request holding the import's claim gets here. */
-  async function finishImport(req: any, res: any, importId: number, team: any, body: any, duplicate: boolean) {
-    const files = await storeFiles(Number(team.id), Number(team.member_id), importId, body);
-    await dbRun("UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?), finished_at = ? WHERE id = ?",
-      JSON.stringify(files.files), files.stored, new Date().toISOString(), importId);
-    res.json(bomResponse(req, await dbGet("SELECT * FROM cad_imports WHERE id = ?", importId), team, duplicate));
+  /** Store the import's files, mark it finished and answer. Only the request holding the import's claim gets here;
+   *  if another request takes the claim over meanwhile, this one stops writing and waits for that one's result. */
+  async function finishImport(req: any, res: any, importId: number, team: any, body: any, duplicate: boolean, claim: { value: string }) {
+    const files = await storeFiles(Number(team.id), Number(team.member_id), importId, body, claim);
+    const done = files && await dbRun(
+      "UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?), finished_at = ? WHERE id = ? AND claimed_at = ? AND finished_at IS NULL",
+      JSON.stringify(files.files), files.stored, new Date().toISOString(), importId, claim.value);
+    const row = await dbGet("SELECT * FROM cad_imports WHERE id = ?", importId);
+    if (!done?.changes) return replayImport(req, res, row, team, body);
+    res.json(bomResponse(req, row, team, duplicate));
   }
 
   /** The same key again: the earlier result once it is finished. An import whose
@@ -252,10 +277,11 @@ export function createControlKitLink(deps: ControlKitDeps) {
     for (;;) {
       if (row.finished_at) return res.json(bomResponse(req, row, team, true));
       const now = Date.now();
+      const claim = { value: newClaim() };
       const took = await dbAll(
         "UPDATE cad_imports SET claimed_at = ? WHERE id = ? AND finished_at IS NULL AND (claimed_at IS NULL OR claimed_at < ?) RETURNING id",
-        new Date(now).toISOString(), row.id, new Date(now - IMPORT_STALL_MS).toISOString());
-      if (took.length) return finishImport(req, res, Number(row.id), team, body, true);
+        claim.value, row.id, new Date(now - IMPORT_STALL_MS).toISOString());
+      if (took.length) return finishImport(req, res, Number(row.id), team, body, true, claim);
       if (now >= deadline) {
         res.setHeader("Retry-After", "5");
         return res.status(503).json({ error: "in_progress", retryAfter: 5 });
@@ -292,11 +318,12 @@ export function createControlKitLink(deps: ControlKitDeps) {
     const importIdSql = "(SELECT id FROM cad_imports WHERE team_id = ? AND idempotency_key = ?)";
     const assembly = [teamId, documentId, elementId];
     const keys = JSON.stringify([...parts.keys()]);
+    const claim = { value: newClaim() };
     const stmts: { sql: string; args: any[] }[] = [{
       sql: `INSERT INTO cad_imports (team_id, idempotency_key, document_id, element_id, assembly_name, assembly_url, revision, part_count, sent_by, sent_by_member_id, created_at, claimed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [teamId, key, documentId, elementId, str(body.assembly.name, 200) || null, str(body.assembly.assemblyUrl, 500) || null, revision,
-        parts.size, team.member_name || email, Number(team.member_id), now, now],
+        parts.size, team.member_name || email, Number(team.member_id), now, claim.value],
     }, {
       // Counted inside the same write transaction as the upserts below, so a
       // send racing this one can't make both report every part as new.
@@ -340,7 +367,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
       if (won) return replayImport(req, res, won, team, body);
       throw e;
     }
-    await finishImport(req, res, importId, team, body, false);
+    await finishImport(req, res, importId, team, body, false, claim);
   }
 
   /** Token exchange, workspaces, BOM send, import history, revoke. Register before the /api session and CSRF guard. */

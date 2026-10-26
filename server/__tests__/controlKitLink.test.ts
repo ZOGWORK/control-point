@@ -112,6 +112,12 @@ describe("helpers", () => {
     expect(partKey({ identity: "a:b:c:d" })).toBe("a:b:c:d");
     expect(partKey({ documentId: "a", elementId: "b", partId: "c", configuration: "d" })).toBe("a:b:c:d");
     expect(partKey({ documentId: "a", elementId: "b", partId: null })).toBeNull();
+    // Long configurations differing only past 500 characters stay two parts.
+    const long = "doc:el:part:" + "x".repeat(600);
+    const a = partKey({ identity: `${long}A` })!, b = partKey({ identity: `${long}B` })!;
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(partKey({ documentId: "doc", elementId: "el", partId: "part", configuration: "x".repeat(600) })).toMatch(/^sha256:/);
   });
   it("rejects payloads the contract calls bad", () => {
     expect(checkPayload(payload("k", [cad("A")]))).toEqual({ ok: true });
