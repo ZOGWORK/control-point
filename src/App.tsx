@@ -22,6 +22,7 @@ const CalendarPage = React.lazy(() => import('./modern/pages/calendar/CalendarPa
 const AttendancePage = React.lazy(() => import('./modern/pages/attendance/AttendancePage').then((m) => ({ default: m.AttendancePage })));
 const PeoplePage = React.lazy(() => import('./modern/pages/people/PeoplePage').then((m) => ({ default: m.PeoplePage })));
 import { forgetRefLink, rememberRefLink, takeRefLink } from './utils/refLinkReturn';
+import { isControlKitConnectPath, rememberControlKitConnect, takeControlKitConnect } from './utils/controlKitConnect';
 import { rememberScoutHandoff, takeScoutHandoff } from './utils/scoutHandoff';
 const RefOpen = React.lazy(() => import('./modern/pages/RefOpen').then((m) => ({ default: m.RefOpen })));
 const CommunicationPage = React.lazy(() => import('./modern/pages/communication/CommunicationPage').then((m) => ({ default: m.CommunicationPage })));
@@ -66,6 +67,7 @@ import { ModernLanding } from './modern/pages/auth/ModernLanding';
 import { OAuthSignupPage, RolePage, SignInPage, SignupPage, VerifyEmailPage } from './modern/pages/auth/AuthPages';
 import { CodeRevealDialog } from './modern/pages/auth/CodeRevealDialog';
 import { TeamlessPage } from './modern/pages/auth/TeamlessPage';
+import { ControlKitConsentPage } from './modern/pages/connect/ControlKitConsentPage';
 import { JoinInvitePage } from './modern/pages/join/JoinInvitePage';
 import { clearInvite, inviteTokenFromPath, joinWithCodeOrLink, peekInvite, stashInvite } from './modern/pages/join/joinLink';
 import { JOIN_REQUESTS_EVENT } from './modern/pages/people/JoinRequestsCard';
@@ -362,8 +364,9 @@ function PageLoadingFallback() {
  *  profile/settings/roles (/roles redirects to Settings → Roles, which gates
  *  itself), inbox (Modern; Legacy redirects it), and stable record links
  *  (/t/...), whose page checks access to the record itself. The pit display
- *  (/pit/<token>) is a kiosk page shown the same signed in or out. */
-export const ALWAYS_REACHABLE_PAGES = ['profile', 'settings', 'roles', 'inbox', 't', 'pit'] as const;
+ *  (/pit/<token>) is a kiosk page shown the same signed in or out, and
+ *  /connect/control-kit is Control Kit's consent page. */
+export const ALWAYS_REACHABLE_PAGES = ['profile', 'settings', 'roles', 'inbox', 't', 'pit', 'connect'] as const;
 
 export default function App() {
   const { t } = useTranslation();
@@ -2034,6 +2037,14 @@ export default function App() {
       .finally(() => { if (inviteTokenFromPath(window.location.pathname)) navigate('/dashboard', { replace: true }); });
   }, [isLoggedIn, teamsLoaded, joinPath]);
 
+  // Control Kit's consent link opened signed out: keep it for after sign-in
+  // and go straight to the sign-in form (it opens in Control Kit's popup).
+  useEffect(() => {
+    if (isLoggedIn || !isControlKitConnectPath(location.pathname)) return;
+    rememberControlKitConnect(location.pathname, location.search);
+    setAuthScreen((s) => (s === 'landing' ? 'login' : s));
+  }, [isLoggedIn, location.pathname, location.search]);
+
   // A scanned QR deep link opened while logged out: after login, bounce back
   // to the check-in page to finish checking in.
   useEffect(() => {
@@ -2050,6 +2061,9 @@ export default function App() {
       // where it's checked against this person's access.
       const ref = takeRefLink();
       if (ref) navigate(ref, { replace: true });
+      // Control Kit's consent page, signed in through OAuth (which lands on "/").
+      const connect = takeControlKitConnect();
+      if (connect && !isControlKitConnectPath(window.location.pathname)) navigate(connect, { replace: true });
     }
   }, [isLoggedIn]);
 
@@ -2480,6 +2494,12 @@ export default function App() {
           onCreateAccount={() => { setNeedsSetup(false); setAuthScreen('role'); }}
         />
       );
+  }
+
+  // Control Kit's consent page: a full page in its popup, for teamless
+  // accounts too (they link now and pick a workspace later).
+  if (isControlKitConnectPath(location.pathname)) {
+    return <ControlKitConsentPage onSignOut={() => void handleLogout()} />;
   }
 
   // Zero-team empty state: create, join, or delete account.

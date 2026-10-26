@@ -1,6 +1,7 @@
-// Settings → Account & privacy: password, data export, cookie choices and
-// account deletion. Passwords are deliberately NOT kept in the draft store —
-// they stay in this component only and are cleared after a change.
+// Settings → Account & privacy: password, sign-in, connected apps, data
+// export, cookie choices and account deletion. Passwords are deliberately
+// NOT kept in the draft store — they stay in this component only and are
+// cleared after a change.
 import { passwordProblem } from '../../../utils/password';
 import { PasswordChecklist } from '../../ui/PasswordChecklist';
 import { useState } from 'react';
@@ -10,6 +11,7 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 import { apiFetch } from '../../../services/api';
 import { confirmDialog, notify } from '../../../components/dialog';
 import { SettingsGroup, SettingsRow } from './SettingsPage';
+import { ConnectedApps } from './ConnectedApps';
 
 function PasswordForm() {
   const [cur, setCur] = useState('');
@@ -127,6 +129,8 @@ export function AccountSection({ currentUser, teams = [], onLogout, onSetupGuide
           </SettingsRow>
         )}
       </SettingsGroup>
+
+      <ConnectedApps />
 
       {onSetupGuide && (
         <SettingsGroup title="Help">

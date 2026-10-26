@@ -1,6 +1,8 @@
 // Modern CAD → Parts list (BOM): a cost summary with a status breakdown,
 // per-subsystem tables with row menus, a drafted add / edit sheet, and the
-// Bruno invoice import as a review dialog.
+// Bruno invoice import as a review dialog. Rows Control Kit sent say so, and
+// a ?import= link (Control Kit's "View in Control Point") shows that import
+// and highlights its rows.
 import { useMemo } from 'react';
 import { Check, CircleDollarSign, ExternalLink, FileUp, Loader2, MoreHorizontal, Package, Pencil, Plus, Sparkles, Trash2, X } from 'lucide-react';
 import { CONTROL_KIT_URL } from '../../../utils/controlKit';
@@ -19,6 +21,7 @@ import { Section, EmptyState } from '../../ui/page';
 import { Reveal } from '../../ui/motion';
 import { AnimatedValue } from '../../AnimatedValue';
 import { BulkBar, RowCheckbox, SelectAllCheckbox, useSelection, type Selection } from '../../ui/selection';
+import { ControlKitImportBanner, ControlKitOrigin, useControlKitImport } from './ControlKitImport';
 
 const rowId = (r: any) => r.id as number;
 
@@ -53,8 +56,11 @@ export function CadPartsTab() {
   const ordered = useMemo(() => ctl.grouped.flatMap((g: any) => g.items), [ctl.grouped]);
   const sel = useSelection(ordered, rowId);
   const cost = useMemo(() => bomCost(ctl.parts), [ctl.parts]);
+  const imp = useControlKitImport();
+  const fromImport = (p: any) => !!imp.data && p.ck_import_id === imp.data.importId;
   return (
     <>
+      <ControlKitImportBanner imp={imp} />
       <Reveal className="mb-8 grid gap-6 rounded-2xl border border-border bg-card p-6 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center 2xl:grid-cols-[auto_minmax(0,1fr)_auto]">
         <div>
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><CircleDollarSign className="size-4 text-accent" />Total BOM cost</p>
@@ -86,13 +92,13 @@ export function CadPartsTab() {
               <span>{sel.count ? `${sel.count} selected` : 'Select all'}</span>
             </label>
           )}
-          <Button asChild variant="outline" title="Control Kit scans an Onshape assembly into a priced BOM. Attaching it here arrives once linking is enabled.">
+          <Button asChild variant="outline" title="Control Kit scans an Onshape assembly into a priced BOM and sends it here.">
             <a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer"><ExternalLink /> Import from Control Kit<span className="sr-only"> (opens in a new tab)</span></a>
           </Button>
           <Button variant="outline" onClick={() => ctl.setShowInvoice(true)}><Sparkles /> Import invoice</Button>
           <Button onClick={() => ctl.setEditing('new')}><Plus /> Add part</Button>
         </div>
-        <p className="text-xs text-muted-foreground lg:col-span-2 2xl:col-span-3">Control Kit makes a priced BOM from an Onshape assembly. Attach a Control Kit BOM here once linking is enabled; until then, it opens in a new tab.</p>
+        <p className="text-xs text-muted-foreground lg:col-span-2 2xl:col-span-3">Control Kit makes a priced BOM from an Onshape assembly. Link Control Point there and press Send: the parts land here, and a new scan updates them in place without touching your statuses or assignees.</p>
       </Reveal>
 
       {!ctl.loaded ? <Skeleton className="h-64" /> : ctl.grouped.length ? ctl.grouped.map(({ section, items }) => {
@@ -106,9 +112,9 @@ export function CadPartsTab() {
                 </TableHeader>
                 <TableBody>
                   {items.map((p: any) => (
-                    <TableRow key={p.id} data-record-id={p.id} data-state={sel.has(p.id) ? 'selected' : undefined}>
+                    <TableRow key={p.id} data-record-id={p.id} data-state={sel.has(p.id) ? 'selected' : undefined} data-import={fromImport(p) ? 'current' : undefined} className={cn(fromImport(p) && 'bg-accent/10 hover:bg-accent/15', p.ck_removed_at && 'text-muted-foreground')}>
                       <TableCell className="w-10"><RowCheckbox sel={sel} id={p.id} label={`Select ${p.name}`} /></TableCell>
-                      <TableCell className="min-w-[10rem] font-medium">{p.name}</TableCell>
+                      <TableCell className="min-w-[10rem] font-medium">{p.name}<ControlKitOrigin part={p} /></TableCell>
                       <TableCell className="text-right tabular-nums">{p.quantity}</TableCell>
                       <TableCell><Badge variant="secondary">{PART_SOURCE_LABELS[p.source] || p.source}</Badge></TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{money(p.unit_cost)}</TableCell>

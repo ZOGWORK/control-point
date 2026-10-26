@@ -91,6 +91,7 @@ import { registerNotebookFileRoutes } from "./server/notebookFiles.js";
 import { NotebookStore, registerNotebookRoutes } from "./server/notebook.js";
 import { registerNotebookReviewRoutes } from "./server/notebookReviews.js";
 import { registerChecklistRoutes } from "./server/checklists.js";
+import { createControlKitLink } from "./server/controlKitLink.js";
 import { registerStickyNoteRoutes } from "./server/stickyNotes.js";
 import { isRefType, resolveRef, type RefDeps } from "./server/refs.js";
 import { createRefsFilter, refsBlock, stripModelRefs, validateRefs } from "./server/brunoRefs.js";
@@ -2315,7 +2316,9 @@ async function startServer() {
     // Camera (QR check-in, video calls), microphone and screen share are used
     // by the app itself; nothing else is.
     res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()");
-    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    // The Control Kit consent page opens in Control Kit's popup, which posts
+    // back to its opener once linked: same-origin here would cut that tie.
+    res.setHeader("Cross-Origin-Opener-Policy", /^\/connect\/control-kit\/?$/i.test(_req.path) ? "unsafe-none" : "same-origin");
     next();
   });
 
@@ -2385,6 +2388,19 @@ async function startServer() {
   });
   app.use("/internal", sharedAccounts.internalRouter());
   sharedAccounts.registerStartRoute(app);
+  // Control Kit link (server/controlKitLink.ts): the token exchange and the
+  // bearer API are server to server (the Control Kit Worker, no client header
+  // or cookie), so they sit before the /api session and CSRF guard too, with
+  // their own body limits (a BOM can be 12 MB). The consent page's own calls
+  // are registered with the CAD routes, behind the guard.
+  const controlKit = createControlKitLink({
+    dbGet, dbAll, dbRun, dbBatchResults, env: process.env,
+    requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
+    // Declared further down; only called per request, after startup.
+    storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
+    appUrl: (req) => (process.env.APP_URL || "").replace(/\/$/, "") || getBaseUrl(req),
+  });
+  controlKit.registerBearerRoutes(app);
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server });
 
@@ -5353,6 +5369,7 @@ async function startServer() {
       { sql: "DELETE FROM cad_reviews WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_snapshots WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_parts WHERE team_id = ?", args: [teamId] },
+      { sql: "DELETE FROM cad_imports WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_docs WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM checkin_sessions WHERE team_id = ?", args: [teamId] },
       // References teams without a cascade.
@@ -16324,6 +16341,9 @@ NOTES>>>`;
       if (err) return res.status(400).json({ error: err.message || "Upload failed" });
       next();
     });
+
+  // Control Kit consent, Connected apps, and a Control Kit import's details.
+  controlKit.registerSessionRoutes(app);
 
   // ================= CAD =================
   // Every route binds auth.teamId; cross-team access is rejected.

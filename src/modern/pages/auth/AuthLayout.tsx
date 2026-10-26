@@ -8,6 +8,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, CalendarCheck, CheckSquare, LineChart, Pause, Play, Wallet } from 'lucide-react';
 import { scoutHandoffPending } from '../../../utils/scoutHandoff';
 import { CONTROL_SCOUT_ICON } from '../../../utils/controlScout';
+import { CONTROL_KIT_ICON } from '../../../utils/controlKit';
+import { controlKitConnectPending } from '../../../utils/controlKitConnect';
 import { Button } from '../../../components/ui-kit';
 import { BrandLogo } from '../../../components/BrandMark';
 import { SignedOutModern } from '../../signedOut';
@@ -157,6 +159,7 @@ export function AuthLayout({ children, onBack, backLabel = 'Back', wide }: {
               transition={{ duration: 0.36, ease: [0.2, 0.8, 0.2, 1] }}
             >
               <ScoutHandoffNote />
+              <ControlKitConnectNote />
               {children}
             </motion.div>
           </div>
@@ -179,6 +182,20 @@ function ScoutHandoffNote() {
       <span className="min-w-0">
         <span className="block font-medium text-foreground">Continuing to Control Scout</span>
         <span className="block text-xs text-muted-foreground">Sign in and you'll go straight back. It's the same account.</span>
+      </span>
+    </div>
+  );
+}
+
+/** Signing in to link Control Kit (its consent popup): say so, with Control Kit's icon. */
+function ControlKitConnectNote() {
+  if (!controlKitConnectPending()) return null;
+  return (
+    <div role="status" className="mb-6 flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-sm">
+      <img src={CONTROL_KIT_ICON} alt="" aria-hidden className="size-8 shrink-0 rounded-lg" />
+      <span className="min-w-0">
+        <span className="block font-medium text-foreground">Linking Control Kit</span>
+        <span className="block text-xs text-muted-foreground">Sign in and you'll choose whether to allow it next.</span>
       </span>
     </div>
   );

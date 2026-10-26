@@ -16,6 +16,8 @@ const KNOWN = [
   /^\/checkin\/[A-Za-z0-9]+\/?$/i,
   /^\/pit\/[A-Za-z0-9_-]{24,64}\/?$/,
   /^\/join\/[^/]+\/?$/i,
+  // Control Kit's consent page (opened in its popup).
+  /^\/connect\/control-kit\/?$/i,
   // Stable record links: /t/<team>/<type>/<id>.
   /^\/t\/\d+\/[a-z_]+\/\d+\/?$/i,
   /^\/predict\/how-it-works$/,
