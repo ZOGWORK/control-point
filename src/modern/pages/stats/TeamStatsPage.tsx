@@ -8,9 +8,17 @@ import { ClipboardPen, Search, Trophy } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '../../../components/ui-kit';
 import { useTeamStats, type TeamStatsMode } from '../../../components/scout/useTeamStats';
 import { Page, PageHeader } from '../../ui/page';
+import { ControlScoutSuggestion } from '../../ui/sisterApp';
+import { CONTROL_SCOUT_URL, controlScoutTeamUrl } from '../../../utils/controlScout';
 import { TeamProfile } from './TeamProfile';
 import { AnalyzeWorkspace } from './AnalyzeWorkspace';
 import { ScoutingWorkspace } from './ScoutingWorkspace';
+
+/** The team on screen on Control Scout: ours on Compete, the one being analyzed on Analyze, else Scout's home. */
+export function scoutHref(ts: { mode: TeamStatsMode; season: number; myTeam: number | null; focusTeam: { number: number } | null }): string {
+  const team = ts.mode === 'analyze' ? ts.focusTeam?.number : ts.myTeam;
+  return team ? controlScoutTeamUrl(team, ts.season) : CONTROL_SCOUT_URL;
+}
 
 export function TeamStatsPage({ teamId, memberId, memberName, canManage }: { teamId?: number | null; memberId?: number | null; memberName?: string | null; canManage?: boolean } = {}) {
   const ts = useTeamStats();
@@ -37,6 +45,8 @@ export function TeamStatsPage({ teamId, memberId, memberName, canManage }: { tea
           </TabsList>
         </Tabs>
       </PageHeader>
+      {/* Our numbers here; the full picture of any team or event on Control Scout. Not on hand scouting. */}
+      {ts.mode !== 'scout' && <ControlScoutSuggestion userId={memberId} href={scoutHref(ts)} />}
       {ts.mode === 'scout' ? (
         <ScoutingWorkspace initialFocusTeam={linkedTeam} season={ts.season} onSeasonChange={ts.setSeason} teamId={teamId} currentMemberId={memberId} currentMemberName={memberName} canManage={canManage} />
       ) : ts.mode === 'compete' ? (

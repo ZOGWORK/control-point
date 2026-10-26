@@ -233,3 +233,18 @@ describe('Modern Predict', () => {
     expect(loc).toBe('/settings?section=workspace');
   });
 });
+
+describe('Control Scout suggestion on Predict', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('links the event on screen on Control Scout; dismissed on Team Stats, it stays hidden here', async () => {
+    scout.fetchScoutTeam.mockResolvedValue(profile([ev('USNJCMPPKWY', 'Championship', '2099-03-15')]));
+    renderPage('/predict?season=2025&event=USNJCMPPKWY');
+    await waitFor(() => expect(screen.getByRole('link', { name: /Open Control Scout/ })).toHaveAttribute('href', 'https://controlscout.org/events/2025/USNJCMPPKWY'));
+    cleanup();
+    localStorage.setItem('cp-stats-control-scout-suggestion-dismissed:anon', '1');
+    renderPage('/predict?season=2025&event=USNJCMPPKWY');
+    await waitFor(() => expect(screen.getAllByText('63%').length).toBeGreaterThan(0));
+    expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+  });
+});

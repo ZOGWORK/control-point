@@ -181,3 +181,29 @@ describe('Modern TeamProfile states', () => {
     window.removeEventListener(BRUNO_OPEN_EVENT, h);
   });
 });
+
+describe('Control Scout suggestion', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('Compete: a quiet card links our team on Control Scout in a new tab, and stays dismissed', async () => {
+    api.fetchScoutTeam.mockResolvedValue(profile());
+    wrap(<TeamStatsPage memberId={7} />);
+    expect(await screen.findByText('Detailed stats in Control Scout')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('link', { name: /Open Control Scout/ })).toHaveAttribute('href', expect.stringMatching(/^https:\/\/controlscout\.org\/teams\/4215\?season=\d{4}$/)));
+    expect(screen.getByRole('link', { name: /Open Control Scout/ })).toHaveAttribute('target', '_blank');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss the Control Scout card' }));
+    expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+    cleanup();
+    wrap(<TeamStatsPage memberId={7} />);
+    expect(await screen.findByRole('heading', { name: '4215' })).toBeInTheDocument();
+    expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+  });
+
+  it('not on hand scouting (Scout mode)', async () => {
+    api.fetchScoutTeam.mockResolvedValue(profile());
+    wrap(<TeamStatsPage memberId={7} />, '/stats?mode=scout');
+    await screen.findByRole('tab', { name: /Scout/, selected: true });
+    expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+  });
+});

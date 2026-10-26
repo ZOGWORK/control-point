@@ -12,6 +12,8 @@ import { relTime, seasonShort, SEASON_NAMES } from '../../../components/scout/Sc
 import { usePredictController, type PredictTab } from '../../../components/predict/usePredictController';
 import { Page, PageHeader, EmptyState } from '../../ui/page';
 import { Reveal } from '../../ui/motion';
+import { ControlScoutSuggestion } from '../../ui/sisterApp';
+import { CONTROL_SCOUT_URL, controlScoutEventUrl } from '../../../utils/controlScout';
 import { OutlookTab, AllianceTab, FieldTab, MatchesTab } from './PredictTabs';
 import { AccuracySheet } from './AccuracySheet';
 import { ratingsStale } from '../../../services/predictApi';
@@ -26,7 +28,7 @@ const STAGES = [
   { k: 'selected', label: 'Alliances selected', short: 'Selected' },
 ] as const;
 
-export function PredictPage() {
+export function PredictPage({ userId }: { userId?: number | null } = {}) {
   const ctl = usePredictController();
   const navigate = useNavigate();
 
@@ -59,6 +61,7 @@ export function PredictPage() {
         <EventPicker ctl={ctl} />
       </PageHeader>
 
+      <ControlScoutSuggestion userId={userId} href={ctl.code ? controlScoutEventUrl(ctl.code, ctl.season) : `${CONTROL_SCOUT_URL}/predict`} />
       {ctl.fc && <StageStrip ctl={ctl} />}
       <Body ctl={ctl} />
       <AccuracySheet open={ctl.showAccuracy} onOpenChange={ctl.setShowAccuracy} accuracy={ctl.accuracy} live={ctl.live} />
