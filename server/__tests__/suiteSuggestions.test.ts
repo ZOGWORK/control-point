@@ -57,6 +57,9 @@ describe("teamNumberIn", () => {
     expect(teamNumberIn("What's our 2025 OPR?")).toBeNull();
     expect(teamNumberIn("Show our 2024 record")).toBeNull();
     expect(teamNumberIn("How is team 2025 doing?")).toBe(2025);
+    // A possessive still names a team, even one numbered like a year.
+    expect(teamNumberIn("What's 2010's OPR?")).toBe(2010);
+    expect(teamNumberIn("What's 2010’s record?")).toBe(2010);
   });
 
   it("a season in an 'our' question links our team, not a team named after the year", () => {
