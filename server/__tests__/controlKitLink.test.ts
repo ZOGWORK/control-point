@@ -15,6 +15,7 @@ const PROD_REDIRECT = "https://control-kit.control-kit-worker.workers.dev/contro
 const basic = (secret = SECRET, id = "control-kit") => `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`;
 
 let t: TestServer;
+let fakeGithub: import("node:http").Server;
 let team = 0, other = 0, noCad = 0;
 let sam = "", outsider = "", teamless = "";
 
@@ -63,7 +64,18 @@ const send = (token: string, ws: number, body: any) => ck(`/api/integrations/con
 const partRows = async () => (await t.db.execute({ sql: "SELECT * FROM cad_parts WHERE team_id = ? AND ck_part_key IS NOT NULL ORDER BY ck_part_key", args: [team] })).rows as any[];
 
 beforeAll(async () => {
-  t = await startTestServer("cp-controlkit-", { CONTROL_KIT_CLIENT_SECRET: SECRET, CONTROL_KIT_REDIRECT_URIS: `${PROD_REDIRECT},${REDIRECT}` });
+  // A fake GitHub on loopback, signing in as Sam, for the consent page's sign-in window.
+  const express = (await import("express")).default;
+  const gh = express();
+  gh.post("/login/oauth/access_token", (_q, r) => { r.json({ access_token: "g" }); });
+  gh.get("/user", (_q, r) => { r.json({ id: 4242, login: "sam" }); });
+  gh.get("/user/emails", (_q, r) => { r.json([{ email: "sam@test.local", primary: true, verified: true }]); });
+  fakeGithub = gh.listen(0);
+  await new Promise((r) => fakeGithub.once("listening", r));
+  t = await startTestServer("cp-controlkit-", {
+    CONTROL_KIT_CLIENT_SECRET: SECRET, CONTROL_KIT_REDIRECT_URIS: `${PROD_REDIRECT},${REDIRECT}`, CONTROL_KIT_REPLAY_WAIT_MS: "300",
+    OAUTH_PROVIDER_STUB: `http://127.0.0.1:${(fakeGithub.address() as import("node:net").AddressInfo).port}`, GITHUB_CLIENT_ID: "h-id", GITHUB_CLIENT_SECRET: "h-secret",
+  });
   team = await seedTeam(t.db, "HORS");
   other = await seedTeam(t.db, "Elsewhere");
   noCad = await seedTeam(t.db, "No CAD");
@@ -79,7 +91,7 @@ beforeAll(async () => {
   outsider = await t.session(outsiderId);
   teamless = await t.session(loneId);
 }, 120_000);
-afterAll(async () => { await t?.stop(); });
+afterAll(async () => { await t?.stop(); fakeGithub?.close(); });
 
 describe("helpers", () => {
   it("allows only exact allowlisted redirect URIs", () => {
@@ -142,8 +154,11 @@ describe("linking", () => {
     expect(stored).not.toContain(r.body.access_token);
     const codes = (await t.db.execute("SELECT code_hash FROM control_kit_codes")).rows.map((x: any) => x.code_hash);
     expect(codes).not.toContain(c);
-    // Reuse is refused.
+    // Reuse is refused, and issues nothing.
+    const tokens = async () => Number(((await t.db.execute("SELECT COUNT(*) AS n FROM control_kit_tokens")).rows[0] as any).n);
+    const before = await tokens();
     expect(await exchange(c)).toMatchObject({ status: 400, body: { error: "invalid_grant" } });
+    expect(await tokens()).toBe(before);
   });
 
   it("refuses an expired code, and one sent with another redirect URI", async () => {
@@ -159,6 +174,17 @@ describe("linking", () => {
     expect(await exchange(c, REDIRECT, basic("wrong"))).toMatchObject({ status: 401, body: { error: "invalid_client" } });
     expect(await exchange(c, REDIRECT, "")).toMatchObject({ status: 401, body: { error: "invalid_client" } });
     expect((await exchange(c)).status).toBe(200);
+  });
+
+  it("signs in through a provider in a window of its own, which comes back marked popup=1", async () => {
+    const go = (path: string, cookie = "") => fetch(`${t.base}${path}`, { redirect: "manual", headers: cookie ? { cookie } : {} });
+    for (const popup of [true, false]) {
+      const start = await go(`/api/auth/github?intent=login${popup ? "&popup=1" : ""}`);
+      const cookie = start.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+      const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+      const cb = await go(`/api/auth/github/callback?code=c&state=${state}`, cookie);
+      expect(cb.headers.get("location")).toBe(popup ? "/?oauth=ok&popup=1" : "/?oauth=ok");
+    }
   });
 });
 
@@ -285,6 +311,47 @@ describe("bearer API", () => {
     expect(Number(count.n)).toBe(1);
   });
 
+  it("counts parts inside the write, so two sends racing on one assembly don't both call every part new", async () => {
+    const token = await link(sam);
+    const race = (key: string) => send(token, team, payload(key, [cad("R1"), cad("R2")], { assembly: { name: "Race", documentId: "doc1", elementId: "asm-race" } }));
+    const [a, b] = await Promise.all([race("k-race-a"), race("k-race-b")]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(a.body.created + b.body.created).toBe(2);
+    expect(a.body.updated + b.body.updated).toBe(2);
+  });
+
+  it("finishes an import whose files never finished when the same key comes again, without rewriting its parts", async () => {
+    const token = await link(sam);
+    const file = Buffer.from("stalled workbook");
+    const { createHash } = await import("node:crypto");
+    const body = payload("k-stall", [cad("S1")], {
+      assembly: { name: "Stall", documentId: "doc1", elementId: "asm-stall" },
+      files: [{ name: "Stall BOM.xlsx", mediaType: "application/octet-stream", sizeBytes: file.length, sha256: createHash("sha256").update(file).digest("hex"), delivery: "inline", contentBase64: file.toString("base64") }],
+    });
+    const first = await send(token, team, body);
+    expect(first.body).toMatchObject({ created: 1, filesStored: 1 });
+    const id = first.body.importId;
+    // As if the server stopped after the parts committed, with its file stored but not recorded.
+    await t.db.execute({ sql: "UPDATE cad_imports SET finished_at = NULL, files = NULL, result = json_set(result, '$.filesStored', 0), claimed_at = ? WHERE id = ?", args: [new Date().toISOString(), id] });
+    await t.db.execute("UPDATE cad_parts SET status = 'ordered' WHERE ck_element_id = 'asm-stall'");
+    // Still claimed by the request that's storing it: the retry is told to come back.
+    const busy = await send(token, team, body);
+    expect(busy).toMatchObject({ status: 503, body: { error: "in_progress" } });
+    expect(busy.headers.get("retry-after")).toBe("5");
+    // Abandoned: the retry finishes it.
+    await t.db.execute({ sql: "UPDATE cad_imports SET claimed_at = ? WHERE id = ?", args: [new Date(Date.now() - 10 * 60 * 1000).toISOString(), id] });
+    const retry = await send(token, team, body);
+    expect(retry.body).toMatchObject({ importId: id, duplicate: true, created: 1, updated: 0, filesStored: 1 });
+    const row = (await t.db.execute({ sql: "SELECT finished_at, files FROM cad_imports WHERE id = ?", args: [id] })).rows[0] as any;
+    expect(row.finished_at).toBeTruthy();
+    expect(JSON.parse(row.files)).toEqual([expect.objectContaining({ name: "Stall BOM.xlsx", stored: true })]);
+    // The file stored before the stop isn't stored twice, and the parts weren't rewritten.
+    expect(Number(((await t.db.execute({ sql: "SELECT COUNT(*) AS n FROM cad_docs WHERE ck_import_id = ?", args: [id] })).rows[0] as any).n)).toBe(1);
+    expect((await t.db.execute("SELECT status FROM cad_parts WHERE ck_element_id = 'asm-stall'")).rows[0]).toMatchObject({ status: "ordered" });
+    // From then on it's a plain duplicate.
+    expect((await send(token, team, body)).body).toMatchObject({ importId: id, duplicate: true, filesStored: 1 });
+  });
+
   it("refuses a body over 12 MB with 413", async () => {
     const token = await link(sam);
     const big = JSON.stringify(payload("k-big", [cad("A")], { padding: "x".repeat(13 * 1024 * 1024) }));
@@ -308,10 +375,30 @@ describe("Connected apps", () => {
     expect((await t.api("/api/integrations/connected-apps", { session: teamless })).body).toHaveLength(1);
   });
 
+  it("voids a code approved but not yet exchanged when the account disconnects", async () => {
+    const pending = await code(sam);
+    expect((await t.post("/api/integrations/control-kit/disconnect", {}, sam)).status).toBe(200);
+    expect(await exchange(pending)).toMatchObject({ status: 400, body: { error: "invalid_grant" } });
+    expect((await t.api("/api/integrations/connected-apps", { session: sam })).body).toEqual([]);
+  });
+
   it("limits each token to 30 calls a minute", async () => {
     const token = await link(sam);
     let last = 0;
     for (let i = 0; i < 31; i++) last = (await ck("/api/integrations/control-kit/workspaces", { token })).status;
     expect(last).toBe(429);
+  });
+});
+
+describe("account deletion", () => {
+  it("removes the account's Control Kit tokens and codes, so the email starts unlinked if it signs up again", async () => {
+    const token = await link(teamless);
+    await code(teamless);
+    const grants = async () => Number(((await t.db.execute(
+      "SELECT (SELECT COUNT(*) FROM control_kit_tokens WHERE email = 'lone@test.local') + (SELECT COUNT(*) FROM control_kit_codes WHERE email = 'lone@test.local') AS n")).rows[0] as any).n);
+    expect(await grants()).toBeGreaterThan(0);
+    expect((await t.api("/api/auth/account", { method: "DELETE", session: teamless })).status).toBe(200);
+    expect(await grants()).toBe(0);
+    expect(await ck("/api/integrations/control-kit/workspaces", { token })).toMatchObject({ status: 401, body: { error: "revoked" } });
   });
 });

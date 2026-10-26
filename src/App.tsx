@@ -22,7 +22,7 @@ const CalendarPage = React.lazy(() => import('./modern/pages/calendar/CalendarPa
 const AttendancePage = React.lazy(() => import('./modern/pages/attendance/AttendancePage').then((m) => ({ default: m.AttendancePage })));
 const PeoplePage = React.lazy(() => import('./modern/pages/people/PeoplePage').then((m) => ({ default: m.PeoplePage })));
 import { forgetRefLink, rememberRefLink, takeRefLink } from './utils/refLinkReturn';
-import { isControlKitConnectPath, rememberControlKitConnect, takeControlKitConnect } from './utils/controlKitConnect';
+import { finishOAuthWindow, isControlKitConnectPath, rememberControlKitConnect, takeControlKitConnect, watchOAuthWindow } from './utils/controlKitConnect';
 import { rememberScoutHandoff, takeScoutHandoff } from './utils/scoutHandoff';
 const RefOpen = React.lazy(() => import('./modern/pages/RefOpen').then((m) => ({ default: m.RefOpen })));
 const CommunicationPage = React.lazy(() => import('./modern/pages/communication/CommunicationPage').then((m) => ({ default: m.CommunicationPage })));
@@ -934,6 +934,8 @@ export default function App() {
     restoreSessionOnce()
       .then(data => {
         if (data.user) {
+          // The sign-in window Control Kit's consent page opened: hand back and close.
+          if (oauthDone && params.get('popup') === '1') finishOAuthWindow();
           const tag = readStoredSessionId() || newSessionTag();
           try { localStorage.setItem(SESSION_TAG_KEY, tag); } catch { /* ignore */ }
           noteSignIn(tag);
@@ -2043,6 +2045,8 @@ export default function App() {
     if (isLoggedIn || !isControlKitConnectPath(location.pathname)) return;
     rememberControlKitConnect(location.pathname, location.search);
     setAuthScreen((s) => (s === 'landing' ? 'login' : s));
+    // Signed in from the provider window: reload this page, which keeps the popup's tie to Control Kit.
+    return watchOAuthWindow(() => window.location.reload());
   }, [isLoggedIn, location.pathname, location.search]);
 
   // A scanned QR deep link opened while logged out: after login, bounce back

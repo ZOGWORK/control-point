@@ -15,6 +15,7 @@ import {
   Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Label,
 } from '../../../components/ui-kit';
 import { oauthUrl } from '../../../services/api';
+import { controlKitConnectPending, openOAuthWindow } from '../../../utils/controlKitConnect';
 import { DiscordIcon, GithubIcon, GoogleIcon } from '../../../components/auth/ProviderIcons';
 import {
   lookupNote,
@@ -67,7 +68,12 @@ function ProviderButtons({ providers, intent }: { providers: Providers; intent: 
         const Icon = PROVIDER_ICON[p];
         return (
           <Button key={p} asChild variant="outline" className="h-11">
-            <a href={oauthUrl(`/api/auth/${p}?intent=${intent}`)} aria-label={`Continue with ${PROVIDER_LABEL[p]}`}>
+            <a
+              href={oauthUrl(`/api/auth/${p}?intent=${intent}`)}
+              aria-label={`Continue with ${PROVIDER_LABEL[p]}`}
+              // Linking Control Kit: sign in from a window of its own, so its popup stays here.
+              onClick={(e) => { if (controlKitConnectPending() && openOAuthWindow(e.currentTarget.href)) e.preventDefault(); }}
+            >
               <Icon /> <span className={cn(list.length > 1 && 'sm:sr-only')}>{PROVIDER_LABEL[p]}</span>
             </a>
           </Button>

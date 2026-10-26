@@ -13,7 +13,9 @@ import { ConnectedApps } from '../pages/settings/ConnectedApps';
 import { CadPage } from '../pages/cad/CadPage';
 import { InterfaceModeProvider } from '../interfaceMode';
 import { clearDrafts } from '../drafts';
-import { controlKitConnectPending, controlKitRedirect, rememberControlKitConnect, takeControlKitConnect } from '../../utils/controlKitConnect';
+import {
+  controlKitConnectPending, controlKitRedirect, finishOAuthWindow, openOAuthWindow, rememberControlKitConnect, takeControlKitConnect, watchOAuthWindow,
+} from '../../utils/controlKitConnect';
 import { isKnownRoute } from '../../utils/publicRoutes';
 
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as any;
@@ -103,6 +105,26 @@ describe('Control Kit consent page', () => {
     expect(takeControlKitConnect()).toBeNull();
     expect(controlKitRedirect(`${REDIRECT}`, { error: 'access_denied', state: 's t' })).toBe(`${REDIRECT}?error=access_denied&state=s+t`);
   });
+
+  it('runs provider sign-in in a window of its own, which tells the consent page and closes', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue({} as Window);
+    expect(openOAuthWindow('/api/auth/google?intent=login')).toBe(true);
+    expect(open).toHaveBeenCalledWith('/api/auth/google?intent=login&popup=1', 'cp-control-kit-signin', expect.stringContaining('popup'));
+    open.mockReturnValue(null);
+    expect(openOAuthWindow('/api/auth/google?intent=login')).toBe(false); // blocked: sign in in place
+    open.mockRestore();
+
+    const signedIn = vi.fn();
+    const stop = watchOAuthWindow(signedIn);
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    rememberControlKitConnect('/connect/control-kit', '?state=abc&redirect_uri=x'); // the copy the sign-in window inherited
+    finishOAuthWindow();
+    expect(close).toHaveBeenCalled();
+    expect(controlKitConnectPending()).toBe(false);
+    await waitFor(() => expect(signedIn).toHaveBeenCalled());
+    stop();
+    close.mockRestore();
+  });
 });
 
 describe('Connected apps', () => {
@@ -124,6 +146,17 @@ describe('Connected apps', () => {
     render(<ConnectedApps />);
     expect(await screen.findByText(/No apps are connected/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Disconnect/ })).toBeNull();
+  });
+
+  it('a failed load offers Retry instead of claiming nothing is connected', async () => {
+    let calls = 0;
+    api.apiFetch.mockImplementation(() => (++calls === 1 ? res({ error: 'Internal server error' }, 500)
+      : res([{ id: 'control-kit', name: 'Control Kit', linkedAt: '2026-10-20T10:00:00.000Z', lastUsedAt: null }])));
+    render(<ConnectedApps />);
+    expect(await screen.findByText(/Couldn’t load your connected apps/)).toBeInTheDocument();
+    expect(screen.queryByText(/No apps are connected/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
+    expect(await screen.findByRole('button', { name: /Disconnect/ })).toBeInTheDocument();
   });
 });
 

@@ -37,6 +37,8 @@ export const BOM_LIMIT = "12mb";
 const MAX_CAD_PARTS = 5000;
 const MAX_FILES = 20;
 const TOKEN_PREFIX = "ckp_";
+/** An unfinished import whose claim is older than this was abandoned; a retry finishes it. */
+export const IMPORT_STALL_MS = 2 * 60 * 1000;
 
 export const sha256 = (s: string | Buffer) => createHash("sha256").update(s).digest("hex");
 const hexColor = (v: unknown) => (typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v.trim()) ? v.trim().toLowerCase() : null);
@@ -100,11 +102,29 @@ export function checkPayload(body: any): PayloadCheck {
   return { ok: true };
 }
 
+/** Revoke every Control Kit token of an account and void its unused codes (Disconnect). */
+export function revokeGrantsSql(email: string, now: string) {
+  return [
+    { sql: "UPDATE control_kit_tokens SET revoked_at = ? WHERE LOWER(email) = LOWER(?) AND revoked_at IS NULL", args: [now, email] },
+    { sql: "UPDATE control_kit_codes SET used_at = ? WHERE LOWER(email) = LOWER(?) AND used_at IS NULL", args: [now, email] },
+  ];
+}
+
+/** Forget an account's Control Kit grants entirely (account deletion): a later account with the same email starts unlinked. */
+export function deleteGrantsSql(email: string) {
+  return [
+    { sql: "DELETE FROM control_kit_tokens WHERE LOWER(email) = LOWER(?)", args: [email] },
+    { sql: "DELETE FROM control_kit_codes WHERE LOWER(email) = LOWER(?)", args: [email] },
+  ];
+}
+
 export function createControlKitLink(deps: ControlKitDeps) {
   const { dbGet, dbAll, dbRun } = deps;
   const limiter = new RateLimiter();
   setInterval(() => limiter.sweep(), 10 * 60 * 1000).unref();
   const configured = () => !!deps.env.CONTROL_KIT_CLIENT_SECRET;
+  // How long a retry waits for an import another request is still finishing before answering 503 in_progress.
+  const replayWaitMs = deps.env.CONTROL_KIT_REPLAY_WAIT_MS ? Math.max(0, Number(deps.env.CONTROL_KIT_REPLAY_WAIT_MS) || 0) : 20_000;
   const cadUrl = (req: any) => `${deps.appUrl(req)}/cad-parts`;
   const importUrl = (req: any, id: number) => `${cadUrl(req)}?import=${id}`;
   /** 429 with Retry-After once `key` is over `max` calls a minute. */
@@ -187,11 +207,15 @@ export function createControlKitLink(deps: ControlKitDeps) {
   async function storeFiles(teamId: number, memberId: number, importId: number, body: any) {
     const out: any[] = [];
     let stored = 0;
+    // A retry finishing a stalled import keeps the files that were already stored.
+    const already = new Map<string, string>((await dbAll("SELECT name, url FROM cad_docs WHERE team_id = ? AND ck_import_id = ?", teamId, importId))
+      .map((r) => [String(r.name), String(r.url)]));
     for (const f of Array.isArray(body.files) ? body.files : []) {
       const name = str(f?.name, 160) || "Control Kit file";
       const base = { name, mediaType: str(f?.mediaType, 120) || "application/octet-stream", sizeBytes: Number(f?.sizeBytes) || null, sha256: str(f?.sha256, 64) || null };
       const content = typeof f?.contentBase64 === "string" ? f.contentBase64 : typeof f?.content === "string" ? f.content : null;
       if (f?.delivery === "reference" || content === null) { out.push({ ...base, stored: false, note: "Available in Control Kit" }); continue; }
+      if (already.has(name)) { out.push({ ...base, stored: true, url: already.get(name) }); stored++; continue; }
       const buffer = Buffer.from(content, "base64");
       if (base.sha256 && sha256(buffer) !== base.sha256.toLowerCase()) { out.push({ ...base, stored: false, note: "Not stored: its checksum did not match" }); continue; }
       try {
@@ -212,6 +236,35 @@ export function createControlKitLink(deps: ControlKitDeps) {
     return { files: out, stored };
   }
 
+  /** Store the import's files, mark it finished and answer. Only the request holding the import's claim gets here. */
+  async function finishImport(req: any, res: any, importId: number, team: any, body: any, duplicate: boolean) {
+    const files = await storeFiles(Number(team.id), Number(team.member_id), importId, body);
+    await dbRun("UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?), finished_at = ? WHERE id = ?",
+      JSON.stringify(files.files), files.stored, new Date().toISOString(), importId);
+    res.json(bomResponse(req, await dbGet("SELECT * FROM cad_imports WHERE id = ?", importId), team, duplicate));
+  }
+
+  /** The same key again: the earlier result once it is finished. An import whose
+   *  parts committed but whose files never finished (the request stalled or the
+   *  server restarted) is finished by the retry; its parts are never written twice. */
+  async function replayImport(req: any, res: any, row: any, team: any, body: any) {
+    const deadline = Date.now() + replayWaitMs;
+    for (;;) {
+      if (row.finished_at) return res.json(bomResponse(req, row, team, true));
+      const now = Date.now();
+      const took = await dbAll(
+        "UPDATE cad_imports SET claimed_at = ? WHERE id = ? AND finished_at IS NULL AND (claimed_at IS NULL OR claimed_at < ?) RETURNING id",
+        new Date(now).toISOString(), row.id, new Date(now - IMPORT_STALL_MS).toISOString());
+      if (took.length) return finishImport(req, res, Number(row.id), team, body, true);
+      if (now >= deadline) {
+        res.setHeader("Retry-After", "5");
+        return res.status(503).json({ error: "in_progress", retryAfter: 5 });
+      }
+      await new Promise((r) => setTimeout(r, 250));
+      row = await dbGet("SELECT * FROM cad_imports WHERE id = ?", row.id);
+    }
+  }
+
   async function importBom(req: any, res: any) {
     const { team, email } = req.ck;
     const teamId = Number(team.id);
@@ -221,7 +274,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
     const key = body.idempotencyKey.trim();
     const findImport = () => dbGet("SELECT * FROM cad_imports WHERE team_id = ? AND idempotency_key = ?", teamId, key);
     const earlier = await findImport();
-    if (earlier) return res.json(bomResponse(req, earlier, team, true));
+    if (earlier) return replayImport(req, res, earlier, team, body);
 
     const documentId = str(body.assembly.documentId, 100);
     const elementId = str(body.assembly.elementId, 100);
@@ -235,22 +288,26 @@ export function createControlKitLink(deps: ControlKitDeps) {
       if (prior) prior.quantity += v.quantity;
       else parts.set(k, { ...v, extra: p.extra });
     }
-    const existing = await dbAll(
-      "SELECT ck_part_key, ck_removed_at FROM cad_parts WHERE team_id = ? AND ck_document_id = ? AND ck_element_id = ? AND ck_part_key IS NOT NULL",
-      teamId, documentId, elementId);
-    const had = new Set(existing.map((r) => String(r.ck_part_key)));
-    const created = [...parts.keys()].filter((k) => !had.has(k)).length;
-    const result = {
-      created, updated: parts.size - created,
-      markedRemoved: existing.filter((r) => !r.ck_removed_at && !parts.has(String(r.ck_part_key))).length, filesStored: 0,
-    };
     const revision = body.revision && typeof body.revision === "object" ? `${str(body.revision.type, 2)}/${str(body.revision.id, 100)}` : null;
     const importIdSql = "(SELECT id FROM cad_imports WHERE team_id = ? AND idempotency_key = ?)";
+    const assembly = [teamId, documentId, elementId];
+    const keys = JSON.stringify([...parts.keys()]);
     const stmts: { sql: string; args: any[] }[] = [{
-      sql: `INSERT INTO cad_imports (team_id, idempotency_key, document_id, element_id, assembly_name, assembly_url, revision, part_count, sent_by, sent_by_member_id, created_at, result)
+      sql: `INSERT INTO cad_imports (team_id, idempotency_key, document_id, element_id, assembly_name, assembly_url, revision, part_count, sent_by, sent_by_member_id, created_at, claimed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [teamId, key, documentId, elementId, str(body.assembly.name, 200) || null, str(body.assembly.assemblyUrl, 500) || null, revision,
-        parts.size, team.member_name || email, Number(team.member_id), now, JSON.stringify(result)],
+        parts.size, team.member_name || email, Number(team.member_id), now, now],
+    }, {
+      // Counted inside the same write transaction as the upserts below, so a
+      // send racing this one can't make both report every part as new.
+      sql: `WITH had AS (SELECT COUNT(*) AS n FROM cad_parts WHERE team_id = ? AND ck_document_id = ? AND ck_element_id = ?
+                           AND ck_part_key IN (SELECT value FROM json_each(?))),
+                 gone AS (SELECT COUNT(*) AS n FROM cad_parts WHERE team_id = ? AND ck_document_id = ? AND ck_element_id = ?
+                           AND ck_part_key IS NOT NULL AND ck_removed_at IS NULL AND ck_part_key NOT IN (SELECT value FROM json_each(?)))
+            UPDATE cad_imports SET result = json_object('created', ? - (SELECT n FROM had), 'updated', (SELECT n FROM had),
+                                                        'markedRemoved', (SELECT n FROM gone), 'filesStored', 0)
+             WHERE team_id = ? AND idempotency_key = ?`,
+      args: [...assembly, keys, ...assembly, keys, parts.size, teamId, key],
     }];
     for (const [k, v] of parts) {
       // People's fields stay theirs: the assignee is never touched, and the
@@ -276,19 +333,14 @@ export function createControlKitLink(deps: ControlKitDeps) {
     });
     let importId: number;
     try {
-      const rs = await deps.dbBatchResults(stmts);
-      importId = rs[0].lastInsertRowid;
-      result.markedRemoved = rs[rs.length - 1].changes;
+      importId = (await deps.dbBatchResults(stmts))[0].lastInsertRowid;
     } catch (e: any) {
       // The same scan arriving twice at once: the second insert hits the unique key and its whole batch rolls back.
       const won = await findImport();
-      if (won) return res.json(bomResponse(req, won, team, true));
+      if (won) return replayImport(req, res, won, team, body);
       throw e;
     }
-    const files = await storeFiles(teamId, Number(team.member_id), importId, body);
-    result.filesStored = files.stored;
-    await dbRun("UPDATE cad_imports SET files = ?, result = ? WHERE id = ?", JSON.stringify(files.files), JSON.stringify(result), importId);
-    res.json(bomResponse(req, await dbGet("SELECT * FROM cad_imports WHERE id = ?", importId), team, false));
+    await finishImport(req, res, importId, team, body, false);
   }
 
   /** Token exchange, workspaces, BOM send, import history, revoke. Register before the /api session and CSRF guard. */
@@ -303,13 +355,19 @@ export function createControlKitLink(deps: ControlKitDeps) {
         const code = typeof body.code === "string" ? body.code : "";
         if (!code || !isAllowedRedirect(body.redirect_uri, deps.env)) return res.status(400).json({ error: "invalid_grant" });
         // One use, atomically: a code used, expired, or sent with another redirect URI is refused.
+        // The token is issued in the same transaction that uses the code, so a
+        // Disconnect (which also voids unused codes) lands wholly before or after.
         const now = new Date().toISOString();
-        const hit = (await dbAll(
-          "UPDATE control_kit_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ? AND redirect_uri = ? RETURNING email",
-          now, sha256(code), now, body.redirect_uri))[0];
-        if (!hit) return res.status(400).json({ error: "invalid_grant" });
         const token = TOKEN_PREFIX + randomBytes(32).toString("base64url");
-        await dbRun("INSERT INTO control_kit_tokens (token_hash, email, created_at) VALUES (?, ?, ?)", sha256(token), String(hit.email), now);
+        const [used] = await deps.dbBatchResults([
+          { sql: "UPDATE control_kit_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ? AND redirect_uri = ? RETURNING email",
+            args: [now, sha256(code), now, body.redirect_uri] },
+          // changes() is the UPDATE's: 0 when the code was refused, so nothing is issued.
+          { sql: "INSERT INTO control_kit_tokens (token_hash, email, created_at) SELECT ?, email, ? FROM control_kit_codes WHERE code_hash = ? AND changes() = 1",
+            args: [sha256(token), now, sha256(code)] },
+        ]);
+        const hit = used.rows[0];
+        if (!hit) return res.status(400).json({ error: "invalid_grant" });
         res.setHeader("Cache-Control", "no-store");
         res.json({ access_token: token, token_type: "Bearer", account: await accountOf(String(hit.email)) });
       } catch (e) { console.error("Control Kit token error:", e); res.status(500).json({ error: "server_error" }); }
@@ -402,12 +460,14 @@ export function createControlKitLink(deps: ControlKitDeps) {
       } catch (e) { console.error("Connected apps error:", e); res.status(500).json({ error: "Internal server error" }); }
     });
 
-    // Disconnect: every Control Kit token of this account, on every device.
+    // Disconnect: every Control Kit token of this account, on every device, and
+    // any code it approved that hasn't been exchanged yet.
     app.post(`${base}/disconnect`, async (req, res) => {
       try {
         const who = await signedIn(req, res);
         if (!who) return;
-        const r = await dbRun("UPDATE control_kit_tokens SET revoked_at = ? WHERE LOWER(email) = LOWER(?) AND revoked_at IS NULL", new Date().toISOString(), who.email);
+        const now = new Date().toISOString();
+        const [r] = await deps.dbBatchResults(revokeGrantsSql(who.email, now));
         res.json({ revoked: r.changes });
       } catch (e) { console.error("Control Kit disconnect error:", e); res.status(500).json({ error: "Internal server error" }); }
     });

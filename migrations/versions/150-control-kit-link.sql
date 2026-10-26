@@ -10,7 +10,9 @@
 --     Hand-made parts leave every ck_* column NULL.
 --   cad_docs.ck_import_id: a file Control Kit sent with that import.
 --   cad_imports: one row per BOM sent, unique per (team, idempotency key), so
---     the same scan sent twice to a workspace is one import.
+--     the same scan sent twice to a workspace is one import. finished_at is
+--     set once its files are stored; until then claimed_at says who is
+--     storing them, so a retry waits for that or finishes a stalled one.
 --   control_kit_codes: one-use authorization codes (SHA-256 only), 5 minutes,
 --     bound to the account email and the redirect URI.
 --   control_kit_tokens: bearer tokens (SHA-256 only) for one account email;
@@ -44,6 +46,8 @@ CREATE TABLE IF NOT EXISTS cad_imports (
   created_at TEXT NOT NULL,
   files TEXT,
   result TEXT,
+  claimed_at TEXT,
+  finished_at TEXT,
   UNIQUE(team_id, idempotency_key),
   FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
