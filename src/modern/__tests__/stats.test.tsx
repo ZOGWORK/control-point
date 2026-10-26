@@ -7,7 +7,8 @@ const api = vi.hoisted(() => ({ fetchScoutTeam: vi.fn(), fetchScoutEvent: vi.fn(
 vi.mock('../../services/ftcScoutApi', async (orig) => ({ ...(await orig<object>()), ...api }));
 
 import { InterfaceModeProvider } from '../interfaceMode';
-import { TeamStatsPage } from '../pages/stats/TeamStatsPage';
+import { TeamStatsPage, scoutHref } from '../pages/stats/TeamStatsPage';
+import { ControlScoutSuggestion } from '../ui/sisterApp';
 import { TeamProfile } from '../pages/stats/TeamProfile';
 import { ScoutHttpError } from '../../services/ftcScoutApi';
 import { BRUNO_OPEN_EVENT, type BrunoOpenDetail } from '../../services/brunoContext';
@@ -205,5 +206,25 @@ describe('Control Scout suggestion', () => {
     wrap(<TeamStatsPage memberId={7} />, '/stats?mode=scout');
     await screen.findByRole('tab', { name: /Scout/, selected: true });
     expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+  });
+});
+
+describe('Control Scout suggestion · links and workspaces', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('Analyze links Scout itself, since the team being analyzed changes inside the workspace', () => {
+    expect(scoutHref({ mode: 'analyze', season: 2025, myTeam: 4215 })).toBe('https://controlscout.org');
+    expect(scoutHref({ mode: 'compete', season: 2025, myTeam: 4215 })).toBe('https://controlscout.org/teams/4215?season=2025');
+    expect(scoutHref({ mode: 'compete', season: 2025, myTeam: null })).toBe('https://controlscout.org');
+  });
+
+  it('switching workspace (a new user id) reads that membership\'s dismissal', () => {
+    localStorage.setItem('cp-stats-control-scout-suggestion-dismissed:9', '1');
+    const { rerender } = render(<ControlScoutSuggestion userId={7} />);
+    expect(screen.getByText('Detailed stats in Control Scout')).toBeInTheDocument();
+    rerender(<ControlScoutSuggestion userId={9} />);
+    expect(screen.queryByText('Detailed stats in Control Scout')).toBeNull();
+    rerender(<ControlScoutSuggestion userId={7} />);
+    expect(screen.getByText('Detailed stats in Control Scout')).toBeInTheDocument();
   });
 });

@@ -16,11 +16,18 @@ export const CONTROL_SCOUT_SUGGESTION = 'cp-stats-control-scout-suggestion-dismi
 
 const isDismissed = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
 
-export function SisterAppSuggestion({ storageKey, icon, title, body, href, cta, app, className }: {
+type SuggestionProps = {
   storageKey: string; icon: string; title: string; body: string; href: string; cta: string;
   /** The app's name, for the dismiss button's label ("Dismiss the Control Kit card"). */
   app: string; className?: string;
-}) {
+};
+
+/** Keyed by its storage key, so switching workspace (a new user id) re-reads that membership's dismissal. */
+export function SisterAppSuggestion(props: SuggestionProps) {
+  return <SuggestionCard key={props.storageKey} {...props} />;
+}
+
+function SuggestionCard({ storageKey, icon, title, body, href, cta, app, className }: SuggestionProps) {
   const [dismissed, setDismissed] = useState(() => isDismissed(storageKey));
   if (dismissed) return null;
   const dismiss = () => { setDismissed(true); try { localStorage.setItem(storageKey, '1'); } catch { /* storage blocked: hidden for this visit */ } };

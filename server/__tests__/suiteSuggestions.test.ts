@@ -53,6 +53,14 @@ describe("teamNumberIn", () => {
     expect(teamNumberIn("4215's record")).toBe(4215);
     expect(teamNumberIn("Compare team 6980 and team 4215")).toBeNull();
     expect(teamNumberIn("Who won in 2025?")).toBeNull();
+    // A season, not a team; "team 2025" still names one.
+    expect(teamNumberIn("What's our 2025 OPR?")).toBeNull();
+    expect(teamNumberIn("Show our 2024 record")).toBeNull();
+    expect(teamNumberIn("How is team 2025 doing?")).toBe(2025);
+  });
+
+  it("a season in an 'our' question links our team, not a team named after the year", () => {
+    expect(suiteSuggestion({ ...base, question: "What's our 2025 OPR?", ownTeam: 18360 })).toContain("https://controlscout.org/teams/18360?season=2025");
   });
 });
 

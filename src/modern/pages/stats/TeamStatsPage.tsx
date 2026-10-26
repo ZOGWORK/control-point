@@ -14,10 +14,11 @@ import { TeamProfile } from './TeamProfile';
 import { AnalyzeWorkspace } from './AnalyzeWorkspace';
 import { ScoutingWorkspace } from './ScoutingWorkspace';
 
-/** The team on screen on Control Scout: ours on Compete, the one being analyzed on Analyze, else Scout's home. */
-export function scoutHref(ts: { mode: TeamStatsMode; season: number; myTeam: number | null; focusTeam: { number: number } | null }): string {
-  const team = ts.mode === 'analyze' ? ts.focusTeam?.number : ts.myTeam;
-  return team ? controlScoutTeamUrl(team, ts.season) : CONTROL_SCOUT_URL;
+/** Our team on Control Scout on Compete. Analyze picks its team inside the
+ *  workspace (search, event field), which this page can't see, so it links
+ *  Scout's home rather than a team that may no longer be on screen. */
+export function scoutHref(ts: { mode: TeamStatsMode; season: number; myTeam: number | null }): string {
+  return ts.mode === 'compete' && ts.myTeam ? controlScoutTeamUrl(ts.myTeam, ts.season) : CONTROL_SCOUT_URL;
 }
 
 export function TeamStatsPage({ teamId, memberId, memberName, canManage }: { teamId?: number | null; memberId?: number | null; memberName?: string | null; canManage?: boolean } = {}) {

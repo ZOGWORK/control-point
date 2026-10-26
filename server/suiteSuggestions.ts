@@ -66,6 +66,8 @@ export function teamNumberIn(question: string): number | null {
   const re = /(?:\bteam\s*#?\s*|#)(\d{1,5})\b|\b(\d{3,5})(?:'s|\s+(?:opr|epa|stats?|rank(?:ing)?|record))\b/gi;
   for (const m of String(question || "").matchAll(re)) {
     const n = Number(m[1] || m[2]);
+    // "our 2025 OPR" names a season, not team 2025 ("team 2025" still counts).
+    if (!m[1] && n >= 2000 && n <= 2099) continue;
     if (n > 0 && n < 100000) found.add(n);
   }
   return found.size === 1 ? [...found][0] : null;
