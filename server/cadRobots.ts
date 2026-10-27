@@ -24,6 +24,14 @@ const MAX_ROBOTS_PER_SEASON = 12;
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const parseExtra = (raw: unknown) => { if (typeof raw !== "string" || !raw) return null; try { return JSON.parse(raw); } catch { return null; } };
 
+/** The assembly picture a Control Kit import stored (contract v1.1: `{assembly} assembly.png`), or null. */
+export function importPicture(files: unknown): string | null {
+  let list: any[] = [];
+  try { list = typeof files === "string" ? JSON.parse(files) || [] : Array.isArray(files) ? files : []; } catch { return null; }
+  const hit = list.find((f) => f?.stored && typeof f.url === "string" && /\.(png|jpe?g|webp)$/i.test(String(f.name)));
+  return hit ? String(hit.url) : null;
+}
+
 /** A part row with its Control Kit line parsed and the type/product in force worked out. */
 export function partView(row: any) {
   const p = { ...row, ck_extra: parseExtra(row.ck_extra) };
@@ -136,6 +144,12 @@ export function createCadRobots(deps: CadRobotDeps) {
         const imports = await dbAll(
           `SELECT i.robot_id, i.id, i.created_at, i.sent_by, i.assembly_name FROM cad_imports i
             WHERE i.team_id = ? AND i.id = (SELECT MAX(j.id) FROM cad_imports j WHERE j.team_id = i.team_id AND j.robot_id = i.robot_id)`, teamId);
+        // Each robot's newest assembly picture, from whichever send carried one.
+        const pictures = new Map<number, string>();
+        for (const i of await dbAll("SELECT robot_id, files FROM cad_imports WHERE team_id = ? AND robot_id IS NOT NULL AND files LIKE '%.png%' ORDER BY id DESC", teamId)) {
+          const url = importPicture(i.files);
+          if (url && !pictures.has(Number(i.robot_id))) pictures.set(Number(i.robot_id), url);
+        }
         const lastImport = new Map(imports.map((i) => [Number(i.robot_id), { id: Number(i.id), sentAt: i.created_at, sentBy: i.sent_by, assemblyName: i.assembly_name }]));
         const current = currentSeason();
         const seasons = [...new Set([current, ...robots.map((r) => Number(r.season))])].sort((a, b) => b - a);
@@ -147,7 +161,7 @@ export function createCadRobots(deps: CadRobotDeps) {
             robots: robots.filter((r) => Number(r.season) === season).map((r) => ({
               id: Number(r.id), name: r.name, season: Number(r.season), isMain: !!r.is_main, assemblyUrl: r.assembly_url, documentId: r.document_id, elementId: r.element_id,
               notes: r.notes, files: Number(r.files) || 0, pendingReviews: Number(r.pending_reviews) || 0, snapshots: Number(r.snapshots) || 0,
-              lastImport: lastImport.get(Number(r.id)) ?? null, bom: bomSummary(byRobot.get(Number(r.id)) ?? []),
+              lastImport: lastImport.get(Number(r.id)) ?? null, picture: pictures.get(Number(r.id)) ?? null, bom: bomSummary(byRobot.get(Number(r.id)) ?? []),
             })),
           })),
         });

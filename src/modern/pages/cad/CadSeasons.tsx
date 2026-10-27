@@ -75,6 +75,8 @@ function RobotCardView({ robot: r, onOpen }: { robot: RobotCard; onOpen: () => v
   const unpriced = b.buyLines + b.counts.hardware - b.priced;
   return (
     <article className="flex h-full flex-col rounded-2xl border border-border bg-card p-5 transition-colors hover:border-accent/40">
+      {/* The whole assembly, never cropped. */}
+      {r.picture && <img src={r.picture} alt={`${r.name} assembly`} className="-mx-1 mb-4 aspect-[16/10] w-[calc(100%+0.5rem)] rounded-xl bg-white object-contain" />}
       <div className="flex items-start gap-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent/15"><Bot className="size-5 text-accent" /></span>
         <div className="min-w-0 flex-1">

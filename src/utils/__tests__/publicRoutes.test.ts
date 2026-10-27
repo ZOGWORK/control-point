@@ -3,7 +3,7 @@ import { isKnownRoute, withHead, PUBLIC_HEADS, publicHeadFor } from '../publicRo
 
 describe('isKnownRoute', () => {
   it('accepts every app route, notebook deep links, join and check-in links', () => {
-    for (const p of ['/', '/dashboard', '/tasks', '/tasks/', '/notebook', '/notebook/p/42', '/cad-parts', '/privacy', '/terms', '/join/cpi_x', '/checkin/AB12', '/predict/how-it-works', '/t/3/task/42', '/t/3/cad_part/7']) {
+    for (const p of ['/', '/dashboard', '/tasks', '/tasks/', '/notebook', '/notebook/p/42', '/cad-parts', '/privacy', '/terms', '/join/cpi_x', '/checkin/AB12', '/predict/how-it-works', '/t/3/task/42', '/t/3/cad_part/7', '/cad/robots/12']) {
       expect(isKnownRoute(p), p).toBe(true);
     }
   });

@@ -111,6 +111,8 @@ describe("a robot's BOM", () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Bearing block' }));
     drawer = await screen.findByRole('dialog');
+    // Control Kit's possible match is a suggestion, not a product in use.
+    expect(within(within(drawer).getByText('1611 Flanged Bearing - 2 Pack').closest('li')!).getByText('Suggested')).toBeInTheDocument();
     const nearRow = within(drawer).getByText('1611 Flanged Bearing (10mm) - 2 Pack').closest('li')!;
     expect(within(nearRow).getByText('Low stock')).toBeInTheDocument();
     expect(within(nearRow).getByText('≈ $11.98 for 4')).toBeInTheDocument();

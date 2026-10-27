@@ -1976,6 +1976,8 @@ export default function App() {
       for (const c of (t as any).children || []) ids.add(c.id);
     }
     for (const id of ALWAYS_REACHABLE_PAGES) ids.add(id);
+    // The old CAD tabs are links into a robot's page now (CadPage redirects them); they stay reachable with CAD.
+    if (ids.has('cad')) for (const id of ['cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts']) ids.add(id);
     return ids;
   }, [visibleTabs]);
   useEffect(() => {

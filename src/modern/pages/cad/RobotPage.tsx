@@ -239,6 +239,9 @@ function BomGroupTable({ group, items, onOpen, highlight, saving }: { group: Bom
             {items.map((p) => {
               const e = p.effective;
               const extra = p.ck_extra;
+              // Products matter for parts the team buys or still has to decide; a made part's near matches are noise.
+              const product = group === 'make' || group === 'ignore' ? (e.productBy === 'control-point' ? e.product : null) : e.product;
+              const picks = group === 'make' || group === 'ignore' ? [] : e.candidates;
               return (
                 <TableRow key={p.id} data-record-id={p.id} onClick={() => onOpen(p.id)} className={cn('cursor-pointer', highlight && p.ck_import_id === highlight && 'bg-accent/5', saving.has(p.id) && 'opacity-60')}>
                   <TableCell className="min-w-[12rem]">
@@ -253,16 +256,16 @@ function BomGroupTable({ group, items, onOpen, highlight, saving }: { group: Bom
                     {(e.typePending || e.productPending) && <span className="mt-1 block text-xs text-muted-foreground">Chosen here · next scan</span>}
                   </TableCell>
                   <TableCell className="min-w-[12rem]">
-                    {e.product ? (
+                    {product ? (
                       <span className="block">
-                        <span className="block truncate text-sm">{vendorName(e.product.vendor)} {e.product.sku}</span>
+                        <span className="block truncate text-sm">{vendorName(product.vendor)} {product.sku}</span>
                         <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           {extra?.matchStatus === 'possible' && e.productBy !== 'control-point' ? <span className="text-orange-600 dark:text-orange-300">Possible match</span> : null}
-                          {e.product.unitsPerPack ? <span>Pack of {e.product.unitsPerPack}</span> : null}
-                          <StockNote stock={e.product.stock} />
+                          {product.unitsPerPack ? <span>Pack of {product.unitsPerPack}</span> : null}
+                          <StockNote stock={product.stock} />
                         </span>
                       </span>
-                    ) : e.candidates.length ? <span className="text-xs text-orange-600 dark:text-orange-300">{e.candidates.length} product{e.candidates.length === 1 ? '' : 's'} to pick from</span>
+                    ) : picks.length ? <span className="text-xs text-orange-600 dark:text-orange-300">{picks.length} product{picks.length === 1 ? '' : 's'} to pick from</span>
                       : <span className="text-xs text-muted-foreground">{group === 'buy' || group === 'hardware' ? 'No vendor match' : '—'}</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{e.totalUsd !== null ? money(e.totalUsd) : <span className="text-muted-foreground">—</span>}</TableCell>
@@ -338,7 +341,9 @@ function PartDrawer({ part, canManage, busy, onClose, onChoose, onEdit, onDelete
               <h3 id="choose-product" className="mb-2 text-sm font-medium">Which product?</h3>
               {e.candidates.length ? (
                 <ul className="grid gap-2">
-                  {e.candidates.map((c) => <CandidateRow key={c.id} c={c} qty={part.quantity} chosen={e.product?.id === c.id} canManage={canManage} busy={busy} onUse={() => void onChoose({ product: c.id })} />)}
+                  {e.candidates.map((c) => <CandidateRow key={c.id} c={c} qty={part.quantity} chosen={e.product?.id === c.id}
+                    // Control Kit's own possible match is only a suggestion until someone confirms it, here or there.
+                    settled={e.productBy === 'control-point' || ['exact', 'confirmed'].includes(x?.matchStatus)} canManage={canManage} busy={busy} onUse={() => void onChoose({ product: c.id })} />)}
                 </ul>
               ) : <p className="text-sm text-muted-foreground">Control Kit found no catalog product for this part. Add the vendor SKU to its part number in Onshape and rescan.</p>}
               {part.choice_product && canManage && (
@@ -377,7 +382,7 @@ function PartDrawer({ part, canManage, busy, onClose, onChoose, onEdit, onDelete
   );
 }
 
-function CandidateRow({ c, qty, chosen, canManage, busy, onUse }: { c: Candidate; qty: number; chosen: boolean; canManage: boolean; busy: boolean; onUse: () => void }) {
+function CandidateRow({ c, qty, chosen, settled, canManage, busy, onUse }: { c: Candidate; qty: number; chosen: boolean; settled: boolean; canManage: boolean; busy: boolean; onUse: () => void }) {
   const estimate = estimateUsd(c, qty);
   return (
     <li className={cn('flex gap-3 rounded-xl border p-3', chosen ? 'border-sky-400/60 bg-sky-400/5' : 'border-border')}>
@@ -393,8 +398,12 @@ function CandidateRow({ c, qty, chosen, canManage, busy, onUse }: { c: Candidate
         </p>
         {c.url && <a href={c.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs underline-offset-4 hover:underline">Product page <ExternalLink className="size-3" /></a>}
       </div>
-      {chosen ? <span className="self-center text-xs font-medium text-sky-600 dark:text-sky-300">In use</span>
-        : <Button size="sm" variant="outline" className="self-center" disabled={!canManage || busy} onClick={onUse}>Use this</Button>}
+      {chosen && settled ? <span className="self-center text-xs font-medium text-sky-600 dark:text-sky-300">In use</span> : (
+        <span className="flex flex-col items-end gap-1 self-center">
+          {chosen && <span className="text-xs font-medium text-orange-600 dark:text-orange-300">Suggested</span>}
+          <Button size="sm" variant="outline" disabled={!canManage || busy} onClick={onUse}>Use this</Button>
+        </span>
+      )}
     </li>
   );
 }

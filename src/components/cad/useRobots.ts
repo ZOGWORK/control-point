@@ -10,7 +10,7 @@ import type { BomGroup, CadType, Candidate, EffectivePart } from '../../types/ca
 export type BomSummary = { counts: Record<BomGroup, number>; parts: number; totalUsd: number; priced: number; buyLines: number; pending: number };
 export type RobotCard = {
   id: number; name: string; season: number; isMain: boolean; assemblyUrl: string | null; documentId: string | null; elementId: string | null; notes: string;
-  files: number; pendingReviews: number; snapshots: number; lastImport: { id: number; sentAt: string; sentBy: string | null; assemblyName: string | null } | null; bom: BomSummary;
+  files: number; pendingReviews: number; snapshots: number; lastImport: { id: number; sentAt: string; sentBy: string | null; assemblyName: string | null } | null; picture: string | null; bom: BomSummary;
 };
 export type SeasonList = { currentSeason: number; canManage: boolean; seasons: { season: number; name: string; robots: RobotCard[] }[] };
 export type BomPart = {
