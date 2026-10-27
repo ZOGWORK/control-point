@@ -92,6 +92,7 @@ import { NotebookStore, registerNotebookRoutes } from "./server/notebook.js";
 import { registerNotebookReviewRoutes } from "./server/notebookReviews.js";
 import { registerChecklistRoutes } from "./server/checklists.js";
 import { createControlKitLink, deleteGrantsSql } from "./server/controlKitLink.js";
+import { createCadRobots, defaultRobotId, teamRobotId } from "./server/cadRobots.js";
 import { registerStickyNoteRoutes } from "./server/stickyNotes.js";
 import { isRefType, resolveRef, type RefDeps } from "./server/refs.js";
 import { createRefsFilter, refsBlock, stripModelRefs, validateRefs } from "./server/brunoRefs.js";
@@ -2019,6 +2020,7 @@ const ROLE_PERMISSIONS = [
   { key: "manage_outreach", label: "Manage outreach" },
   { key: "manage_checklists", label: "Manage checklists" },
   { key: "manage_documentation", label: "Manage documentation" },
+  { key: "manage_cad", label: "Manage CAD robots and part choices" },
   { key: "edit_notebook", label: "Edit notebook pages" },
   { key: "organize_notebook", label: "Organize notebooks" },
   { key: "delete_notebook", label: "Delete notebook items" },
@@ -2091,14 +2093,14 @@ async function ensureRolesSeeded(teamId: number | null | undefined) {
   if (!names.has("Member")) {
     const memberRole = (await dbRun(
       "INSERT INTO roles (team_id, name, color, permissions, position, is_system) VALUES (?,?,?,?,?,1)",
-      teamId, "Member", "#71717A", JSON.stringify(["view_ai", "manage_calendar", "manage_communications", "manage_tasks", "manage_outreach", "manage_checklists", "edit_notebook", "organize_notebook"]), 1
+      teamId, "Member", "#71717A", JSON.stringify(["view_ai", "manage_calendar", "manage_communications", "manage_tasks", "manage_outreach", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad"]), 1
     )) as any;
     memberRoleId = Number(memberRole.lastInsertRowid);
   }
   if (!names.has("Verified Member")) {
     await dbRun(
       "INSERT INTO roles (team_id, name, color, permissions, position, is_system) VALUES (?,?,?,?,?,1)",
-      teamId, "Verified Member", "#22C55E", JSON.stringify(["view_ai", "manage_inventory", "manage_calendar", "manage_tasks", "manage_documentation", "manage_communications", "manage_outreach", "manage_attendance", "manage_code", "manage_budget", "manage_checklists", "edit_notebook", "organize_notebook"]), 2
+      teamId, "Verified Member", "#22C55E", JSON.stringify(["view_ai", "manage_inventory", "manage_calendar", "manage_tasks", "manage_documentation", "manage_communications", "manage_outreach", "manage_attendance", "manage_code", "manage_budget", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad"]), 2
     );
   }
 
@@ -2395,8 +2397,10 @@ async function startServer() {
   // or cookie), so they sit before the /api session and CSRF guard too, with
   // their own body limits (a BOM can be 12 MB). The consent page's own calls
   // are registered with the CAD routes, behind the guard.
+  // CAD by season and robot; Control Kit reads the part choices made in it.
+  const cadRobots = createCadRobots({ dbGet, dbAll, dbRun, dbBatchResults, requireAuth: requireAuth as any, hasPerm });
   const controlKit = createControlKitLink({
-    dbGet, dbAll, dbRun, dbBatchResults, env: process.env,
+    dbGet, dbAll, dbRun, dbBatchResults, env: process.env, decisionsFor: cadRobots.decisionsFor,
     requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
     // Declared further down; only called per request, after startup.
     storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
@@ -16358,6 +16362,14 @@ NOTES>>>`;
     if (!auth.teamId) { res.status(400).json({ error: "Join a team first" }); return null; }
     return auth.teamId as number;
   };
+  cadRobots.registerRoutes(app);
+  // Lists take ?robot= to show one robot's rows; a new row goes to the robot it names, else the team's latest main robot.
+  const cadRobotFilter = async (teamId: number, q: unknown) => {
+    if (q === undefined || q === "") return { sql: "", args: [] as any[] };
+    const id = await teamRobotId({ dbGet }, teamId, q);
+    return { sql: " AND robot_id = ?", args: [id ?? -1] };
+  };
+  const cadRobotFor = async (teamId: number, raw: unknown) => (await teamRobotId({ dbGet }, teamId, raw)) ?? (await defaultRobotId({ dbGet, dbRun }, teamId));
 
   // ---- Onshape docs ----
   app.get("/api/cad/docs", async (req, res) => {
@@ -16365,7 +16377,8 @@ NOTES>>>`;
       const auth = await requireAuth(req, res);
       if (!auth) return;
       const teamId = cadTeam(auth, res); if (!teamId) return;
-      const docs = await dbAll("SELECT * FROM cad_docs WHERE team_id = ? ORDER BY created_at DESC", teamId);
+      const f = await cadRobotFilter(teamId, req.query.robot);
+      const docs = await dbAll(`SELECT * FROM cad_docs WHERE team_id = ?${f.sql} ORDER BY created_at DESC`, teamId, ...f.args);
       res.json(docs);
     } catch (e) { console.error("CAD docs list error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16380,8 +16393,8 @@ NOTES>>>`;
       if (!name) return res.status(400).json({ error: "Document name is required" });
       if (!isValidHttpUrl(url)) return res.status(400).json({ error: "Enter a valid http(s) URL" });
       const now = new Date().toISOString();
-      const r = await dbRun("INSERT INTO cad_docs (team_id, name, url, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-        teamId, name, url, auth.memberId, now);
+      const r = await dbRun("INSERT INTO cad_docs (team_id, name, url, created_by, created_at, robot_id) VALUES (?, ?, ?, ?, ?, ?)",
+        teamId, name, url, auth.memberId, now, await cadRobotFor(teamId, req.body?.robot_id));
       res.json({ id: r.lastInsertRowid, name, url });
     } catch (e) { console.error("CAD doc create error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16408,11 +16421,12 @@ NOTES>>>`;
       const auth = await requireAuth(req, res);
       if (!auth) return;
       const teamId = cadTeam(auth, res); if (!teamId) return;
+      const f = await cadRobotFilter(teamId, req.query.robot);
       const reviews = await dbAll(`
         SELECT r.*, m.name AS author_name,
           (SELECT COUNT(*) FROM cad_review_comments c WHERE c.review_id = r.id) AS comment_count
         FROM cad_reviews r LEFT JOIN members m ON m.id = r.created_by
-        WHERE r.team_id = ? ORDER BY r.updated_at DESC`, teamId);
+        WHERE r.team_id = ?${f.sql.replace("robot_id", "r.robot_id")} ORDER BY r.updated_at DESC`, teamId, ...f.args);
       res.json(reviews);
     } catch (e) { console.error("CAD reviews list error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16440,9 +16454,9 @@ NOTES>>>`;
       }
       const now = new Date().toISOString();
       const r = await dbRun(
-        `INSERT INTO cad_reviews (team_id, title, section, onshape_url, screenshot_url, description, status, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?)`,
-        teamId, title, section, onshape_url || null, screenshot_url, description, auth.memberId, now, now);
+        `INSERT INTO cad_reviews (team_id, title, section, onshape_url, screenshot_url, description, status, created_by, created_at, updated_at, robot_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'concept', ?, ?, ?, ?)`,
+        teamId, title, section, onshape_url || null, screenshot_url, description, auth.memberId, now, now, await cadRobotFor(teamId, req.body?.robot_id));
       res.json({ id: r.lastInsertRowid });
     } catch (e) { console.error("CAD review create error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16527,10 +16541,11 @@ NOTES>>>`;
       const auth = await requireAuth(req, res);
       if (!auth) return;
       const teamId = cadTeam(auth, res); if (!teamId) return;
+      const f = await cadRobotFilter(teamId, req.query.robot);
       const snaps = await dbAll(`
         SELECT s.*, m.name AS author_name FROM cad_snapshots s
         LEFT JOIN members m ON m.id = s.created_by
-        WHERE s.team_id = ? ORDER BY s.created_at DESC`, teamId);
+        WHERE s.team_id = ?${f.sql.replace("robot_id", "s.robot_id")} ORDER BY s.created_at DESC`, teamId, ...f.args);
       res.json(snaps);
     } catch (e) { console.error("CAD snapshots list error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16563,10 +16578,10 @@ NOTES>>>`;
         });
       }
       const r = await dbRun(
-        `INSERT INTO cad_snapshots (team_id, title, section, file_url, file_name, file_size, file_type, screenshot_url, notes, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO cad_snapshots (team_id, title, section, file_url, file_name, file_size, file_type, screenshot_url, notes, created_by, created_at, robot_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         teamId, title, section, fileUrl(modelId), model.originalname, model.size, file_type,
-        screenshotId ? fileUrl(screenshotId) : null, notes, auth.memberId, now);
+        screenshotId ? fileUrl(screenshotId) : null, notes, auth.memberId, now, await cadRobotFor(teamId, req.body?.robot_id));
       res.json({ id: r.lastInsertRowid });
     } catch (e) { console.error("CAD snapshot upload error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16596,7 +16611,8 @@ NOTES>>>`;
       const auth = await requireAuth(req, res);
       if (!auth) return;
       const teamId = cadTeam(auth, res); if (!teamId) return;
-      const parts = await dbAll("SELECT * FROM cad_parts WHERE team_id = ? ORDER BY section, name", teamId);
+      const f = await cadRobotFilter(teamId, req.query.robot);
+      const parts = await dbAll(`SELECT * FROM cad_parts WHERE team_id = ?${f.sql} ORDER BY section, name`, teamId, ...f.args);
       res.json(parts);
     } catch (e) { console.error("CAD parts list error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
@@ -16611,9 +16627,9 @@ NOTES>>>`;
       const v = parsed.value!;
       const now = new Date().toISOString();
       const r = await dbRun(
-        `INSERT INTO cad_parts (team_id, name, section, quantity, source, unit_cost, status, assignee, notes, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        teamId, v.name, v.section, v.quantity, v.source, v.unit_cost, v.status, v.assignee, v.notes, auth.memberId, now, now);
+        `INSERT INTO cad_parts (team_id, name, section, quantity, source, unit_cost, status, assignee, notes, created_by, created_at, updated_at, robot_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        teamId, v.name, v.section, v.quantity, v.source, v.unit_cost, v.status, v.assignee, v.notes, auth.memberId, now, now, await cadRobotFor(teamId, req.body?.robot_id));
       res.json({ id: r.lastInsertRowid });
     } catch (e) { console.error("CAD part create error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
