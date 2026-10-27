@@ -39,12 +39,17 @@ export function homeworkScore(text: string): number {
   return score;
 }
 
+/** A message that says outright it's for school, whatever came before it. */
+const SCHOOL_MARKER = /\b(homework|assignments?|worksheets?|quiz(zes)?|exams?|test answers|for (my |a |our |the )?(\w+ )?(class|school|teacher)|(math|algebra|geometry|calculus|english|history|science|chemistry|biology|physics|spanish|french|economics) (class|test|essay|project))\b/i;
+
 /** Plain schoolwork with nothing about FTC or the team in it. Earlier
- *  messages the member sent in this chat count as context too: "now solve
- *  for x" after a question about odometry is a follow-up, so Bruno decides. */
+ *  messages the member sent in this chat count as context for an ambiguous
+ *  follow-up ("now solve for x" after a question about odometry, so Bruno
+ *  decides), never for a request that says it's for school. */
 export function isOffTopicSchoolwork(text: string, earlier: string[] = []): boolean {
   const t = String(text || "");
   if (homeworkScore(t) < HOMEWORK_THRESHOLD || FTC_CONTEXT.test(t)) return false;
+  if (SCHOOL_MARKER.test(t)) return true;
   return !earlier.some((m) => FTC_CONTEXT.test(String(m || "")));
 }
 

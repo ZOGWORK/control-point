@@ -45,4 +45,10 @@ describe("isOffTopicSchoolwork", () => {
     expect(isOffTopicSchoolwork("now solve for x: 2x - 4 = 10", earlier)).toBe(false);
     expect(isOffTopicSchoolwork("now solve for x: 2x - 4 = 10", ["what's for lunch"])).toBe(true);
   });
+
+  it("an earlier robot question doesn't excuse a request that says it's for school", () => {
+    const earlier = ["how do I convert odometry encoder ticks to inches?"];
+    expect(isOffTopicSchoolwork("write my history essay for school", earlier)).toBe(true);
+    expect(isOffTopicSchoolwork("now do my math homework: solve for x, 3x = 9", earlier)).toBe(true);
+  });
 });
