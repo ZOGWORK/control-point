@@ -11,14 +11,29 @@ vi.mock('../../components/CadModelViewer', () => ({ default: ({ fileName, onClos
 import { InterfaceModeProvider } from '../interfaceMode';
 import { CadPage } from '../pages/cad/CadPage';
 import { clearDrafts, setDraft } from '../drafts';
+import { effectivePart } from '../../types/cadBom';
 
 globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as any;
 const json = (body: any, ok = true) => Promise.resolve({ ok, status: ok ? 200 : 400, json: async () => body });
 const me = { id: 7, name: 'Ada', team_id: 1, interface_mode: 'modern' };
-const calls = (url: string, method?: string) => api.apiFetch.mock.calls.filter((c) => c[0] === url && (method ? c[1]?.method === method : !c[1]?.method));
+// Lists on a robot's page ask for ?robot=1; calls compare the bare endpoint.
+const bare = (u: string) => String(u).split('?')[0];
+const calls = (url: string, method?: string) => api.apiFetch.mock.calls.filter((c) => bare(c[0]) === url && (method ? c[1]?.method === method : !c[1]?.method));
 
 let db: Record<string, any>;
+const robot = { robot: { id: 1, name: 'Competition robot', season: 2025, seasonName: '2025–26 DECODE', isMain: true, assemblyUrl: null, documentId: null, elementId: null, notes: '' },
+  canManage: true, parts: [], imports: [], summary: { counts: { review: 0, buy: 0, make: 0, hardware: 0, ignore: 0 }, parts: 0, totalUsd: 0, priced: 0, buyLines: 0, pending: 0 } };
+/** The robot's page reads its parts from the robot detail, with the type in force worked out as the server does. */
+const detail = (parts: any[]) => ({ ...robot, parts: parts.map((p) => ({ ck_extra: null, ...p, effective: effectivePart({ ck_extra: null, ...p }) })) });
+const seasons = { currentSeason: 2026, canManage: true, seasons: [
+  { season: 2026, name: '2026–27 BIOBUZZ', robots: [] },
+  { season: 2025, name: '2025–26 DECODE', robots: [{ id: 1, name: 'Competition robot', season: 2025, isMain: true, assemblyUrl: 'https://cad.onshape.com/documents/a/w/w/e/e', documentId: 'a', elementId: 'e', notes: '',
+    files: 1, pendingReviews: 1, snapshots: 2, lastImport: null, bom: { counts: { review: 3, buy: 2, make: 1, hardware: 0, ignore: 0 }, parts: 6, totalUsd: 100, priced: 2, buyLines: 2, pending: 0 } }] },
+] };
+/** A GET as the server answers it: the robot detail, or the list for the bare endpoint. */
+const read = (url: string) => (bare(url) === '/api/cad/robots/1' ? detail(db['/api/cad/parts']) : db[bare(url)] ?? []);
 const fresh = () => ({
+  '/api/cad/robots': seasons,
   '/api/cad/dashboard': { docsCount: 2, pendingReviews: 1, snapshotsCount: 1, partsCount: 3, partsTotalCost: 120.5, needsAttention: [{ id: 5, title: 'Intake v3', section: 'Intake', author_name: 'Bo', updated_at: '2026-09-01' }], recent: [{ kind: 'doc', id: 1, title: 'Robot assembly', ts: '2026-09-02' }] },
   '/api/cad/docs': [{ id: 1, name: 'Robot assembly', url: 'https://cad.onshape.com/documents/a', created_at: '2026-09-01' }],
   '/api/cad/reviews': [
@@ -40,7 +55,7 @@ const fresh = () => ({
 beforeEach(() => {
   db = fresh();
   api.apiFetch.mockReset();
-  api.apiFetch.mockImplementation((url: string, init?: any) => (init?.method ? json({ id: 99 }) : json(db[url] ?? [])));
+  api.apiFetch.mockImplementation((url: string, init?: any) => (init?.method ? json({ id: 99 }) : json(read(url))));
   dialog.notify.mockReset();
   dialog.confirmDialog.mockReset();
   dialog.confirmDialog.mockResolvedValue(true);
@@ -50,9 +65,11 @@ afterEach(cleanup);
 
 let loc = '';
 function Where() { loc = useLocation().pathname; return null; }
-const setup = (tab: string, isAdmin = false) => render(
+// The old tabs now live on a robot's page.
+const TAB: Record<string, string> = { 'cad-docs': 'files', 'cad-reviews': 'reviews', 'cad-snapshots': 'snapshots', 'cad-parts': 'bom' };
+const setup = (tab: string, isAdmin = false, search = '') => render(
   <InterfaceModeProvider user={me} team={{}} onUserSaved={() => {}}>
-    <MemoryRouter initialEntries={[`/${tab}`]}>
+    <MemoryRouter initialEntries={[TAB[tab] ? `/cad/robots/1?tab=${TAB[tab]}${search}` : `/${tab}${search}`]}>
       <Routes><Route path="*" element={<><CadPage activeTab={tab} currentUser={{ id: 7 }} isAdmin={isAdmin} /><Where /></>} /></Routes>
     </MemoryRouter>
   </InterfaceModeProvider>,
@@ -63,13 +80,14 @@ const menu = async (label: string, item: RegExp) => {
 };
 
 describe('Modern CAD', () => {
-  it('overview: stats, the review queue and activity; tiles navigate', async () => {
+  it('seasons: newest season with robots opens, each robot shows its BOM, and a card opens the robot', async () => {
     setup('cad');
-    expect(await screen.findByText('Intake v3')).toBeInTheDocument();
-    expect(screen.getByText('$120.50 total')).toBeInTheDocument();
-    expect(screen.getByText('Robot assembly')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /Parts/ }));
-    expect(loc).toBe('/cad-parts');
+    expect(await screen.findByRole('tab', { name: /2025–26 DECODE/, selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /2026–27 BIOBUZZ/ })).toBeInTheDocument();
+    expect(screen.getByText('$100.00')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '3 needs a decision, 2 buy, 1 make' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Decide 3 parts/ }));
+    expect(loc).toBe('/cad/robots/1');
   });
 
   it('docs: link (POST) clears the form; unlink after confirm', async () => {
@@ -79,7 +97,7 @@ describe('Modern CAD', () => {
     fireEvent.change(screen.getByLabelText('Onshape link'), { target: { value: 'https://cad.onshape.com/documents/d' } });
     fireEvent.click(screen.getByRole('button', { name: /Link/ }));
     await waitFor(() => expect(calls('/api/cad/docs', 'POST')).toHaveLength(1));
-    expect(JSON.parse(calls('/api/cad/docs', 'POST')[0][1].body)).toEqual({ name: 'Drivetrain', url: 'https://cad.onshape.com/documents/d' });
+    expect(JSON.parse(calls('/api/cad/docs', 'POST')[0][1].body)).toEqual({ name: 'Drivetrain', url: 'https://cad.onshape.com/documents/d', robot_id: 1 });
     await waitFor(() => expect(screen.getByLabelText('Document name')).toHaveValue(''));
     expect(calls('/api/cad/docs').length).toBeGreaterThanOrEqual(2); // refetched
     await menu('Actions for Robot assembly', /Unlink/);
@@ -160,10 +178,10 @@ describe('Modern CAD', () => {
     expect((calls('/api/cad/snapshots', 'POST')[0][1].body as FormData).get('title')).toBe('arm.stl');
   });
 
-  it('parts: BOM total and status mix; add validates numbers; edit (PATCH) and delete', async () => {
+  it('parts: hand-made rows sit in the BOM by type; add validates numbers and saves to the robot; edit (PATCH) and delete from the drawer', async () => {
     setup('cad-parts');
     expect(await screen.findByText('Omni wheel')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Parts by status' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Buy/ })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: /Add part/ })[0]);
     fireEvent.change(await screen.findByLabelText('Part name'), { target: { value: 'Bearing' } });
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '0' } });
@@ -173,22 +191,28 @@ describe('Modern CAD', () => {
     fireEvent.change(screen.getByLabelText('Unit cost ($)'), { target: { value: '1.25' } });
     fireEvent.submit(document.getElementById('bom-form')!);
     await waitFor(() => expect(calls('/api/cad/parts', 'POST')).toHaveLength(1));
-    expect(JSON.parse(calls('/api/cad/parts', 'POST')[0][1].body)).toMatchObject({ name: 'Bearing', quantity: 8, unit_cost: 1.25, section: 'Intake', source: 'purchased', status: 'to_order' });
+    expect(JSON.parse(calls('/api/cad/parts', 'POST')[0][1].body)).toMatchObject({ name: 'Bearing', quantity: 8, unit_cost: 1.25, section: 'Intake', source: 'purchased', status: 'to_order', robot_id: 1 });
     await waitFor(() => expect(screen.queryByLabelText('Part name')).not.toBeInTheDocument());
-    await menu('Actions for Servo', /Edit part/);
+    fireEvent.click(screen.getByRole('button', { name: 'Servo' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /Edit part/ }));
     expect(await screen.findByLabelText('Part name')).toHaveValue('Servo');
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
     await waitFor(() => expect(calls('/api/cad/parts/22', 'PATCH')).toHaveLength(1));
     expect(JSON.parse(calls('/api/cad/parts/22', 'PATCH')[0][1].body)).toMatchObject({ quantity: 3 });
-    await menu('Actions for Omni wheel', /Delete/);
+    await waitFor(() => expect(screen.queryByLabelText('Part name')).not.toBeInTheDocument());
+    // The part's drawer comes back after the edit; close it to reach the list.
+    fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Omni wheel' }));
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /Delete/ }));
     await waitFor(() => expect(calls('/api/cad/parts/21', 'DELETE')).toHaveLength(1));
   });
 
   it('invoice import: parse → untick → import the selected rows', async () => {
     api.apiFetch.mockImplementation((url: string, init?: any) => {
       if (url === '/api/cad/parts/import-invoice/parse') return json({ items: [{ name: 'Bolt pack', quantity: 2, unitPrice: 5, sku: 'B1' }, { name: 'Wheel', quantity: 4, unitPrice: 12 }] });
-      return init?.method ? json({ id: 1 }) : json(db[url] ?? []);
+      return init?.method ? json({ id: 1 }) : json(read(url));
     });
     setup('cad-parts');
     fireEvent.click(await screen.findByRole('button', { name: /Import invoice/ }));
@@ -207,7 +231,7 @@ describe('Modern CAD', () => {
     let finish: (v: any) => void = () => {};
     api.apiFetch.mockImplementation((url: string, init?: any) => {
       if (url === '/api/cad/parts' && init?.method === 'POST') return new Promise((r) => { finish = r; });
-      return init?.method ? json({}) : json(db[url] ?? []);
+      return init?.method ? json({}) : json(read(url));
     });
     const first = setup('cad-parts');
     fireEvent.click(await screen.findByRole('button', { name: /Add part/ }));
@@ -226,7 +250,7 @@ describe('Modern CAD', () => {
     let reply: (v: any) => void = () => {};
     api.apiFetch.mockImplementation((url: string, init?: any) => {
       if (url === '/api/cad/parts/import-invoice/parse') return new Promise((r) => { reply = r; });
-      return init?.method ? json({ id: 1 }) : json(db[url] ?? []);
+      return init?.method ? json({ id: 1 }) : json(read(url));
     });
     setup('cad-parts');
     fireEvent.click(await screen.findByRole('button', { name: /Import invoice/ }));
@@ -246,7 +270,7 @@ describe('Modern CAD', () => {
     let reply: (v: any) => void = () => {};
     api.apiFetch.mockImplementation((url: string, init?: any) => {
       if (url === '/api/cad/parts/import-invoice/parse') return new Promise((r) => { reply = r; });
-      return init?.method ? json({ id: 1 }) : json(db[url] ?? []);
+      return init?.method ? json({ id: 1 }) : json(read(url));
     });
     setup('cad-parts');
     fireEvent.click(await screen.findByRole('button', { name: /Import invoice/ }));
@@ -267,7 +291,7 @@ describe('Modern CAD', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: /Delete/ }));
     await waitFor(() => expect(dialog.confirmDialog).toHaveBeenCalled());
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    api.apiFetch.mockImplementation((url: string, init?: any) => (init?.method === 'DELETE' ? json({}, false) : json(db[url] ?? [])));
+    api.apiFetch.mockImplementation((url: string, init?: any) => (init?.method === 'DELETE' ? json({}, false) : json(read(url))));
     fireEvent.click(within(sheet).getByRole('button', { name: /Delete/ }));
     await waitFor(() => expect(dialog.notify).toHaveBeenCalledWith('Could not delete.', 'error'));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -285,7 +309,7 @@ describe('Modern CAD', () => {
     let finish: (v: any) => void = () => {};
     api.apiFetch.mockImplementation((url: string, init?: any) => {
       if (url === '/api/cad/parts' && init?.method === 'POST') return new Promise((r) => { finish = r; });
-      return init?.method ? json({}) : json(db[url] ?? []);
+      return init?.method ? json({}) : json(read(url));
     });
     setup('cad-parts');
     fireEvent.click(await screen.findByRole('button', { name: /Add part/ }));
@@ -317,7 +341,7 @@ describe('Modern CAD links to one record', () => {
       open(tab, `?id=${id}`);
       await screen.findAllByText(text);
       await waitFor(() => expect(document.querySelector(`[data-record-id="${id}"]`)?.classList.contains('cp-record-focus')).toBe(true));
-      await waitFor(() => expect(search).toBe(''));
+      await waitFor(() => expect(search).not.toContain('id='));
       cleanup();
     }
   });
@@ -325,6 +349,6 @@ describe('Modern CAD links to one record', () => {
   it('opens the linked design review, even when it is filtered out', async () => {
     open('cad-reviews', '?id=6');
     expect(await screen.findByRole('dialog', { name: /Lift v2/ })).toBeInTheDocument();
-    await waitFor(() => expect(search).toBe(''));
+    await waitFor(() => expect(search).not.toContain('id='));
   });
 });

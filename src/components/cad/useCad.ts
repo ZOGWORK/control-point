@@ -10,7 +10,11 @@
 // after a sign-out or workspace switch. Lists refresh through a small CAD
 // event bus, so a save that finishes after the page was left (mode switch)
 // still refreshes whichever page is mounted now.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+//
+// CAD is organised by robot (migration 151): inside a robot's page every list
+// shows that robot's rows and every new row is saved to it (CadRobotContext).
+// Outside one, lists show the whole team and the server picks the robot.
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { apiFetch } from '../../services/api';
 import { notify, confirmDialog } from '../dialog';
@@ -44,21 +48,42 @@ function bySection<T extends { section: string }>(rows: T[]) {
 // Tell every mounted list for `url` to reload (works across remounts).
 const cadBus = new EventTarget();
 export function cadChanged(url: string) { cadBus.dispatchEvent(new Event(url)); }
+/** Run `fn` when any of these CAD lists changes here, or Bruno adds parts. */
+export function useCadChanged(urls: string[], fn: () => void) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  const key = urls.join('|');
+  useEffect(() => {
+    const on = () => ref.current();
+    const list = key.split('|');
+    for (const u of list) cadBus.addEventListener(u, on);
+    const onBruno = (e: Event) => { if (((e as CustomEvent).detail?.types ?? []).includes('cad-parts')) on(); };
+    window.addEventListener('bruno-data-changed', onBruno);
+    return () => { for (const u of list) cadBus.removeEventListener(u, on); window.removeEventListener('bruno-data-changed', onBruno); };
+  }, [key]);
+}
+
+/** The robot whose page is showing, or null for the whole team. */
+export const CadRobotContext = createContext<number | null>(null);
+export const useCadRobot = () => useContext(CadRobotContext);
+/** A list endpoint scoped to the robot on screen. The bus still keys refreshes by the bare endpoint. */
+const scoped = (url: string, robot: number | null) => (robot ? `${url}?robot=${robot}` : url);
 
 /** Load a list with latest-wins (a slow older load can't overwrite a newer one). */
 function useList<T>(url: string) {
+  const robot = useCadRobot();
   const [rows, setRows] = useState<T[]>([]);
   const [loaded, setLoaded] = useState(false);
   const seq = useRef(0);
   const load = useCallback(async () => {
     const id = ++seq.current;
     try {
-      const r = await apiFetch(url);
+      const r = await apiFetch(scoped(url, robot));
       if (r.ok) { const d = await r.json(); if (id === seq.current) setRows(d); }
     } catch { /* keep the last list */ } finally {
       if (id === seq.current) setLoaded(true);
     }
-  }, [url]);
+  }, [url, robot]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const on = () => { void load(); };
@@ -122,6 +147,7 @@ async function bulkRemoveRows(endpoint: string, ids: number[], setRows: (fn: (p:
 }
 
 export function useCadDocs() {
+  const robot = useCadRobot();
   const { rows: docs, setRows: setDocs, loaded } = useList<any>('/api/cad/docs');
   const [name, rawSetName] = useDraft<string>('cad:doc-name', '');
   const [url, rawSetUrl] = useDraft<string>('cad:doc-url', '');
@@ -135,7 +161,7 @@ export function useCadDocs() {
     const release = lock.begin();
     const clear = inEpoch(() => { rawSetName(''); rawSetUrl(''); });
     try {
-      const r = await apiFetch('/api/cad/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n, url: u }) });
+      const r = await apiFetch('/api/cad/docs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n, url: u, robot_id: robot }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { notify(d.error || 'Could not link the document.', 'error'); return; }
       clear(); cadChanged('/api/cad/docs'); notify('Onshape doc linked.', 'success');
@@ -204,6 +230,7 @@ const REVIEW_KEY = 'cad:review-form';
 const blankReview = (): ReviewFormState => ({ title: '', section: 'Intake', onshapeUrl: '', description: '', shot: null });
 
 export function useReviewForm(onDone: () => void) {
+  const robot = useCadRobot();
   const [form, rawSet] = useDraft<ReviewFormState>(REVIEW_KEY, blankReview());
   const lock = useLock('cad:review-saving');
   const set = (patch: Partial<ReviewFormState>) => { if (!lock.held()) rawSet((f) => ({ ...f, ...patch })); };
@@ -220,6 +247,7 @@ export function useReviewForm(onDone: () => void) {
       fd.append('onshape_url', f.onshapeUrl.trim());
       fd.append('description', f.description.trim());
       if (f.shot) fd.append('screenshot', f.shot);
+      if (robot) fd.append('robot_id', String(robot));
       const r = await apiFetch('/api/cad/reviews', { method: 'POST', body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { notify(d.error || 'Could not submit the design.', 'error'); return; }
@@ -289,6 +317,7 @@ const SNAP_KEY = 'cad:snap-form';
 const blankSnap = (): SnapshotFormState => ({ title: '', section: 'Intake', model: null, shot: null, notes: '' });
 
 export function useSnapshotForm(onDone: () => void) {
+  const robot = useCadRobot();
   const [form, rawSet] = useDraft<SnapshotFormState>(SNAP_KEY, blankSnap());
   const lock = useLock('cad:snap-saving');
   const set = (patch: Partial<SnapshotFormState>) => { if (!lock.held()) rawSet((f) => ({ ...f, ...patch })); };
@@ -306,6 +335,7 @@ export function useSnapshotForm(onDone: () => void) {
       fd.append('title', f.title.trim() || f.model.name);
       fd.append('section', f.section);
       fd.append('notes', f.notes.trim());
+      if (robot) fd.append('robot_id', String(robot));
       const r = await apiFetch('/api/cad/snapshots', { method: 'POST', body: fd });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { notify(d.error || 'Upload failed.', 'error'); return; }
@@ -374,6 +404,7 @@ export function bomNumbersError(quantity: unknown, cost: unknown): string | null
 }
 
 export function usePartForm(initial: any | null, onDone: () => void) {
+  const robot = useCadRobot();
   const key = `cad:part-form:${initial?.id ?? 'new'}`;
   const [form, rawSet] = useDraft<PartFormState>(key, partFormFrom(initial));
   const lock = useLock('cad:part-saving');
@@ -393,7 +424,7 @@ export function usePartForm(initial: any | null, onDone: () => void) {
     };
     const finish = inEpoch(() => { deleteDraft(key); if (stillOpen()) onDone(); cadChanged('/api/cad/parts'); });
     try {
-      const body = { name: f.name.trim(), section: f.section, quantity: Number(f.quantity) || 1, source: f.source, unit_cost: Number(f.unitCost) || 0, status: f.status, assignee: f.assignee.trim(), notes: f.notes.trim() };
+      const body = { name: f.name.trim(), section: f.section, quantity: Number(f.quantity) || 1, source: f.source, unit_cost: Number(f.unitCost) || 0, status: f.status, assignee: f.assignee.trim(), notes: f.notes.trim(), ...(initial ? {} : { robot_id: robot }) };
       const r = await apiFetch(initial ? `/api/cad/parts/${initial.id}` : '/api/cad/parts', {
         method: initial ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
@@ -417,6 +448,7 @@ const INVOICE_PARSING_KEY = 'cad:invoice-parsing';
 const INVOICE_SEQ_KEY = 'cad:invoice-parse-seq';
 
 export function useCadInvoiceImport(onDone: () => void) {
+  const robot = useCadRobot();
   const [files, setFiles] = useDraft<File[]>('cad:invoice-files', []);
   // Drafted so a returning page can't start a second parse on top; only the
   // newest parse may fill the review.
@@ -496,6 +528,7 @@ export function useCadInvoiceImport(onDone: () => void) {
             status: it.status,
             assignee: '',
             notes: String(it.notes || '').trim(),
+            robot_id: robot,
           }),
         }).then((r) => r.ok).catch(() => false)
       ));

@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { startTestServer, seedTeam, seedMember, type TestServer } from "./helpers/testServer";
 import { checkPayload, clientSecretMatches, isAllowedRedirect, partKey } from "../controlKitLink";
+import { currentSeason } from "../../src/types/cadBom";
 
 vi.setConfig({ testTimeout: 60_000 });
 
@@ -258,7 +259,9 @@ describe("bearer API", () => {
     }));
     expect(first.status).toBe(200);
     expect(first.body).toMatchObject({ duplicate: false, workspace: { id: team, name: "HORS", ftcNumber: "6980" }, created: 3, updated: 0, markedRemoved: 0, filesStored: 1 });
-    expect(first.body.url).toBe(`${t.base}/cad-parts?import=${first.body.importId}`);
+    // No robot yet: the import makes one for its assembly in the current season, and opens on it.
+    expect(first.body.robot).toMatchObject({ name: "Robot", season: currentSeason() });
+    expect(first.body.url).toBe(`${t.base}/cad/robots/${first.body.robot.id}?import=${first.body.importId}`);
     const docs = (await t.db.execute({ sql: "SELECT name, url FROM cad_docs WHERE ck_import_id = ?", args: [first.body.importId] })).rows as any[];
     expect(docs).toHaveLength(1);
     expect(docs[0]).toMatchObject({ name: "Robot BOM.xlsx" });

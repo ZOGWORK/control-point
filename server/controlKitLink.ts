@@ -13,6 +13,7 @@ import express, { type Express } from "express";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { RateLimiter, clientIp } from "./rateLimit.js";
 import { sanitizePartInput } from "./cad.js";
+import { robotForAssembly } from "./cadRobots.js";
 import { parseDisabledModules } from "../src/types/teamModules.js";
 
 type Auth = { memberId: number; teamId: number | null; teamless?: boolean; email?: string };
@@ -28,6 +29,8 @@ export interface ControlKitDeps {
   /** This server's public origin, e.g. https://tryctrlpoint.org. */
   appUrl: (req: any) => string;
   env: Record<string, string | undefined>;
+  /** Choices made in Control Point for one document's parts (cadRobots.decisionsFor). */
+  decisionsFor: (teamId: number, documentId: string) => Promise<any[]>;
 }
 
 export const CONTROL_KIT_CLIENT_ID = "control-kit";
@@ -130,7 +133,8 @@ export function createControlKitLink(deps: ControlKitDeps) {
   // How long a retry waits for an import another request is still finishing before answering 503 in_progress.
   const replayWaitMs = deps.env.CONTROL_KIT_REPLAY_WAIT_MS ? Math.max(0, Number(deps.env.CONTROL_KIT_REPLAY_WAIT_MS) || 0) : 20_000;
   const cadUrl = (req: any) => `${deps.appUrl(req)}/cad-parts`;
-  const importUrl = (req: any, id: number) => `${cadUrl(req)}?import=${id}`;
+  /** An import opens on its robot's BOM; one without a robot (sent before robots existed) on /cad-parts, which redirects. */
+  const importUrl = (req: any, id: number, robotId?: number | null) => robotId ? `${deps.appUrl(req)}/cad/robots/${robotId}?import=${id}` : `${cadUrl(req)}?import=${id}`;
   /** 429 with Retry-After once `key` is over `max` calls a minute. */
   const throttled = (res: any, key: string, max: number) => {
     const wait = limiter.hit(key, { max, windowMs: 60 * 1000 });
@@ -196,14 +200,16 @@ export function createControlKitLink(deps: ControlKitDeps) {
     return {
       importId: Number(row.id), idempotencyKey: String(row.idempotency_key), sentAt: String(row.created_at), sentBy: row.sent_by || null,
       created: Number(result.created) || 0, updated: Number(result.updated) || 0, markedRemoved: Number(result.markedRemoved) || 0,
-      filesStored: Number(result.filesStored) || 0, url: importUrl(req, Number(row.id)),
+      filesStored: Number(result.filesStored) || 0, url: importUrl(req, Number(row.id), row.robot_id ? Number(row.robot_id) : null),
     };
   }
-  const bomResponse = (req: any, row: any, team: any, duplicate: boolean) => {
+  const bomResponse = async (req: any, row: any, team: any, duplicate: boolean) => {
     const s = importSummary(req, row);
+    const robot = row.robot_id ? await dbGet("SELECT id, name, season FROM cad_robots WHERE id = ?", row.robot_id) : null;
     return {
       importId: s.importId, duplicate, workspace: { id: Number(team.id), name: String(team.name), ftcNumber: team.ftc_team_number ? String(team.ftc_team_number) : null },
       created: s.created, updated: s.updated, markedRemoved: s.markedRemoved, filesStored: s.filesStored, url: s.url, sentAt: s.sentAt,
+      robot: robot ? { id: Number(robot.id), name: String(robot.name), season: Number(robot.season) } : null,
     };
   };
 
@@ -239,8 +245,8 @@ export function createControlKitLink(deps: ControlKitDeps) {
         const next = newClaim();
         const [held] = await deps.dbBatchResults([
           { sql: "UPDATE cad_imports SET claimed_at = ? WHERE id = ? AND claimed_at = ? AND finished_at IS NULL", args: [next, importId, claim.value] },
-          { sql: "INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id) SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1",
-            args: [teamId, name, url, memberId, new Date().toISOString(), importId] },
+          { sql: "INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id, robot_id) SELECT ?, ?, ?, ?, ?, ?, (SELECT robot_id FROM cad_imports WHERE id = ?) WHERE changes() = 1",
+            args: [teamId, name, url, memberId, new Date().toISOString(), importId, importId] },
         ]);
         if (!held.changes) return null;
         claim.value = next;
@@ -266,7 +272,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
       JSON.stringify(files.files), files.stored, new Date().toISOString(), importId, claim.value);
     const row = await dbGet("SELECT * FROM cad_imports WHERE id = ?", importId);
     if (!done?.changes) return replayImport(req, res, row, team, body);
-    res.json(bomResponse(req, row, team, duplicate));
+    res.json(await bomResponse(req, row, team, duplicate));
   }
 
   /** The same key again: the earlier result once it is finished. An import whose
@@ -275,7 +281,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
   async function replayImport(req: any, res: any, row: any, team: any, body: any) {
     const deadline = Date.now() + replayWaitMs;
     for (;;) {
-      if (row.finished_at) return res.json(bomResponse(req, row, team, true));
+      if (row.finished_at) return res.json(await bomResponse(req, row, team, true));
       const now = Date.now();
       const claim = { value: newClaim() };
       const took = await dbAll(
@@ -315,15 +321,20 @@ export function createControlKitLink(deps: ControlKitDeps) {
       else parts.set(k, { ...v, extra: p.extra });
     }
     const revision = body.revision && typeof body.revision === "object" ? `${str(body.revision.type, 2)}/${str(body.revision.id, 100)}` : null;
+    // The robot this assembly belongs to (contract v1.1 "Where an import lands"); its rows and files follow it.
+    const assemblyUrl = str(body.assembly.assemblyUrl, 500);
+    const robot = await robotForAssembly(deps, teamId, documentId, elementId,
+      { name: str(body.assembly.name, 80), url: /^https:\/\/([\w-]+\.)*onshape\.com\//i.test(assemblyUrl) ? assemblyUrl : null }, Number(team.member_id));
+    const robotId = robot ? Number(robot.id) : null;
     const importIdSql = "(SELECT id FROM cad_imports WHERE team_id = ? AND idempotency_key = ?)";
     const assembly = [teamId, documentId, elementId];
     const keys = JSON.stringify([...parts.keys()]);
     const claim = { value: newClaim() };
     const stmts: { sql: string; args: any[] }[] = [{
-      sql: `INSERT INTO cad_imports (team_id, idempotency_key, document_id, element_id, assembly_name, assembly_url, revision, part_count, sent_by, sent_by_member_id, created_at, claimed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      sql: `INSERT INTO cad_imports (team_id, idempotency_key, document_id, element_id, assembly_name, assembly_url, revision, part_count, sent_by, sent_by_member_id, created_at, claimed_at, robot_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [teamId, key, documentId, elementId, str(body.assembly.name, 200) || null, str(body.assembly.assemblyUrl, 500) || null, revision,
-        parts.size, team.member_name || email, Number(team.member_id), now, claim.value],
+        parts.size, team.member_name || email, Number(team.member_id), now, claim.value, robotId],
     }, {
       // Counted inside the same write transaction as the upserts below, so a
       // send racing this one can't make both report every part as new.
@@ -337,19 +348,20 @@ export function createControlKitLink(deps: ControlKitDeps) {
       args: [...assembly, keys, ...assembly, keys, parts.size, teamId, key],
     }];
     for (const [k, v] of parts) {
-      // People's fields stay theirs: the assignee is never touched, and the
-      // status only moves while it is still "to order".
+      // People's fields stay theirs: the assignee and Control Point choices
+      // (choice_*) are never touched, and the status only moves while it is
+      // still "to order". A row follows its assembly's robot.
       stmts.push({
         sql: `INSERT INTO cad_parts (team_id, name, section, quantity, source, unit_cost, status, assignee, notes, created_by, created_at, updated_at,
-                ck_document_id, ck_element_id, ck_part_key, ck_import_id, ck_extra, ck_removed_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ${importIdSql}, ?, NULL)
+                ck_document_id, ck_element_id, ck_part_key, ck_import_id, ck_extra, ck_removed_at, robot_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ${importIdSql}, ?, NULL, ?)
               ON CONFLICT(team_id, ck_document_id, ck_element_id, ck_part_key) WHERE ck_part_key IS NOT NULL DO UPDATE SET
                 name = excluded.name, section = excluded.section, quantity = excluded.quantity, source = excluded.source,
                 unit_cost = excluded.unit_cost, notes = excluded.notes, ck_extra = excluded.ck_extra, ck_import_id = excluded.ck_import_id,
-                ck_removed_at = NULL, updated_at = excluded.updated_at,
+                ck_removed_at = NULL, updated_at = excluded.updated_at, robot_id = excluded.robot_id,
                 status = CASE WHEN cad_parts.status = 'to_order' THEN excluded.status ELSE cad_parts.status END`,
         args: [teamId, v.name, v.section, v.quantity, v.source, v.unit_cost, v.status, v.notes, Number(team.member_id), now, now,
-          documentId, elementId, k, teamId, key, JSON.stringify(v.extra ?? null)],
+          documentId, elementId, k, teamId, key, JSON.stringify(v.extra ?? null), robotId],
       });
     }
     // Rows of this assembly the new scan doesn't have stay, marked.
@@ -425,6 +437,15 @@ export function createControlKitLink(deps: ControlKitDeps) {
           Number(req.ck.team.id), ...(document ? [document] : []), ...(element ? [element] : []));
         res.json(rows.map((r) => { const { filesStored: _f, ...s } = importSummary(req, r); return s; }));
       } catch (e) { console.error("Control Kit imports error:", e); res.status(500).json({ error: "server_error" }); }
+    });
+
+    // Choices made in Control Point for one document's parts (contract v1.1 §5), for Control Kit's next scan.
+    app.get(`${base}/workspaces/:id/decisions`, guard(false), async (req: any, res) => {
+      try {
+        const document = str(req.query.document, 100);
+        if (!document) return res.status(400).json({ error: "bad_request", detail: "document is required." });
+        res.json({ decisions: await deps.decisionsFor(Number(req.ck.team.id), document) });
+      } catch (e) { console.error("Control Kit decisions error:", e); res.status(500).json({ error: "server_error" }); }
     });
 
     app.post(`${base}/revoke`, async (req, res) => {
@@ -511,7 +532,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
         let files: any[] = [];
         try { files = JSON.parse(row.files || "[]") || []; } catch { /* none */ }
         const s = importSummary(req, row);
-        res.json({ ...s, assemblyName: row.assembly_name, assemblyUrl: row.assembly_url, revision: row.revision, partCount: Number(row.part_count) || 0, files });
+        res.json({ ...s, robotId: row.robot_id ? Number(row.robot_id) : null, assemblyName: row.assembly_name, assemblyUrl: row.assembly_url, revision: row.revision, partCount: Number(row.part_count) || 0, files });
       } catch (e) { console.error("CAD import detail error:", e); res.status(500).json({ error: "Internal server error" }); }
     });
   }
