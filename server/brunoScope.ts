@@ -19,6 +19,8 @@ export const HOMEWORK_SIGNALS: [RegExp, number][] = [
   [/\b(write|draft|compose|give me|make me)\b[^.?!\n]{0,40}\b(essays?|poems?|short stor(y|ies)|book reports?|research papers?|thesis|speech|lab reports?|paragraphs?)\b/i, 3],
   // "math homework", "english essay", "history test"
   [/\b(math|algebra|geometry|calculus|english|history|science|chemistry|biology|physics|spanish|french|economics) (homework|class|assignment|worksheet|test|quiz|essay|project|exam)\b/i, 2],
+  // "… for my literature class", "… for school"
+  [/\bfor (my |a |our |the )?(\w+ )?(class|school|teacher)\b/i, 2],
   [/\bsolve for [a-z]\b/i, 4],
   [/\b(derivative|integral|antiderivative) of\b/i, 4],
   // "solve 3x + 5 = 20", "solve x^2 - 4 = 0"
@@ -27,8 +29,9 @@ export const HOMEWORK_SIGNALS: [RegExp, number][] = [
 export const HOMEWORK_THRESHOLD = 4;
 
 /** Words that tie a message to the robot or the team: those always reach
- *  Bruno (a portfolio essay, gear-ratio math, an outreach write-up). */
-const FTC_CONTEXT = /\b(ftc|first tech|robot\w*|drive ?train|intake|outtake|servos?|motors?|gear(s|ing|box|boxes)?|odometry|encoders?|autonomous|auto|tele-?op|op ?modes?|control hub|expansion hub|gobilda|rev robotics|notebook|portfolio|outreach|judg(e|es|ing)|inspire|awards?|scrimmages?|alliances?|opr|biobuzz|onshape|cad|chassis|slides?|sponsors?|fundrais\w*|control point|bruno)\b/i;
+ *  Bruno (a portfolio essay, gear-ratio math, an outreach write-up). Never
+ *  the assistant's own name: "Bruno, write my essay" is still homework. */
+const FTC_CONTEXT = /\b(ftc|first tech|robot\w*|drive ?train|intake|outtake|servos?|motors?|gear(s|ing|box|boxes)?|odometry|encoders?|autonomous|auto|tele-?op|op ?modes?|control hub|expansion hub|gobilda|rev robotics|notebook|portfolio|outreach|judg(e|es|ing)|inspire|awards?|scrimmages?|alliances?|opr|biobuzz|onshape|cad|chassis|slides?|sponsors?|fundrais\w*)\b/i;
 
 export function homeworkScore(text: string): number {
   let score = 0;
@@ -36,10 +39,13 @@ export function homeworkScore(text: string): number {
   return score;
 }
 
-/** Plain schoolwork with nothing about FTC or the team in it. */
-export function isOffTopicSchoolwork(text: string): boolean {
+/** Plain schoolwork with nothing about FTC or the team in it. Earlier
+ *  messages the member sent in this chat count as context too: "now solve
+ *  for x" after a question about odometry is a follow-up, so Bruno decides. */
+export function isOffTopicSchoolwork(text: string, earlier: string[] = []): boolean {
   const t = String(text || "");
-  return homeworkScore(t) >= HOMEWORK_THRESHOLD && !FTC_CONTEXT.test(t);
+  if (homeworkScore(t) < HOMEWORK_THRESHOLD || FTC_CONTEXT.test(t)) return false;
+  return !earlier.some((m) => FTC_CONTEXT.test(String(m || "")));
 }
 
 /** What Bruno says instead (shown and saved like any reply). */

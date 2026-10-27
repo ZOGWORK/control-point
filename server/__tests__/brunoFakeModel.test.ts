@@ -228,6 +228,21 @@ describe("schoolwork that isn't for the team", () => {
     expect(r.shown).toMatch(/I stick to robotics and your team's work/);
   });
 
+  it("a math follow-up in a chat about the robot still reaches Bruno", async () => {
+    gemini.script = ["x = 7, so the wheel turns 7 times."];
+    const chat = await t.post("/api/bruno/chats", {}, session);
+    const headers = new Headers({ "Content-Type": "application/json", "X-CP-Client": "1" });
+    withSession(headers, session);
+    const messages = [
+      { role: "user", text: "how do I convert odometry encoder ticks to inches?" },
+      { role: "model", text: "Divide ticks by ticks per revolution, then multiply by the wheel circumference." },
+      { role: "user", text: "now solve for x: 2x - 4 = 10" },
+    ];
+    const res = await fetch(`${t.base}/api/ai/build-helper?stream=true`, { method: "POST", headers, body: JSON.stringify({ messages, chatId: chat.body.id }) });
+    expect(await res.text()).toMatch(/x = 7/);
+    expect(gemini.requests).toHaveLength(1);
+  });
+
   it("writing for the team still reaches Bruno", async () => {
     gemini.script = ["Here's a draft for your Inspire portfolio page."];
     const r = await ask("help me write an essay for our robotics portfolio");

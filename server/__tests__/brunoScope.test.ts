@@ -16,6 +16,8 @@ describe("isOffTopicSchoolwork", () => {
     "solve for x: 2x - 4 = 10",
     "what is the derivative of x^2 sin x",
     "draft a poem about autumn for english class",
+    "Write a poem about autumn for my literature class",
+    "Bruno, write my essay about the French Revolution for school",
   ])("refuses %j", (text) => {
     expect(isOffTopicSchoolwork(text)).toBe(true);
   });
@@ -31,5 +33,16 @@ describe("isOffTopicSchoolwork", () => {
     "fix this NullPointerException in my TeleOp",
   ])("lets %j through", (text) => {
     expect(isOffTopicSchoolwork(text)).toBe(false);
+  });
+
+  it("addressing Bruno by name doesn't change the answer", () => {
+    expect(isOffTopicSchoolwork("Bruno, write an essay on chocolate milk")).toBe(true);
+    expect(isOffTopicSchoolwork("hey bruno can you do my math homework")).toBe(true);
+  });
+
+  it("a follow-up in a chat about the robot goes to Bruno", () => {
+    const earlier = ["how do I convert odometry encoder ticks to inches?"];
+    expect(isOffTopicSchoolwork("now solve for x: 2x - 4 = 10", earlier)).toBe(false);
+    expect(isOffTopicSchoolwork("now solve for x: 2x - 4 = 10", ["what's for lunch"])).toBe(true);
   });
 });
