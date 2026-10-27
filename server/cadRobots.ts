@@ -74,14 +74,26 @@ export async function robotForAssembly(deps: Pick<CadRobotDeps, "dbGet" | "dbRun
       if (took.changes) return linked();
     }
   }
-  const season = currentSeason();
-  const hasMain = await deps.dbGet("SELECT 1 AS x FROM cad_robots WHERE team_id = ? AND season = ? AND is_main = 1", teamId, season);
-  try {
-    await deps.dbRun(`INSERT INTO cad_robots (team_id, season, name, is_main, document_id, element_id, assembly_url, created_by, created_at, updated_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      teamId, season, assembly.name || "Robot", hasMain ? 0 : 1, documentId, elementId, assembly.url, memberId, now, now);
-  } catch { /* the same assembly's first send twice at once: the other one created it */ }
+  try { await insertRobot(deps, { teamId, season: currentSeason(), name: assembly.name || "Robot", documentId, elementId, assemblyUrl: assembly.url, memberId }); }
+  catch { /* the same assembly's first send twice at once: the other one created it */ }
   return linked();
+}
+
+/**
+ * Adds a robot. It is its season's main robot exactly when the season has none, decided inside the insert, and the
+ * unique index on (team, season) where main enforces it: a second main that loses a race is inserted as not main.
+ */
+export async function insertRobot(deps: Pick<CadRobotDeps, "dbRun">, r: { teamId: number; season: number; name: string; documentId?: string | null; elementId?: string | null; assemblyUrl?: string | null; memberId?: number | null }) {
+  const now = new Date().toISOString();
+  const sql = (main: string) => `INSERT INTO cad_robots (team_id, season, name, is_main, document_id, element_id, assembly_url, created_by, created_at, updated_at)
+    SELECT ?, ?, ?, ${main}, ?, ?, ?, ?, ?, ?`;
+  const args = [r.teamId, r.season, r.name, r.documentId ?? null, r.elementId ?? null, r.assemblyUrl ?? null, r.memberId ?? null, now, now];
+  const first = `CASE WHEN EXISTS (SELECT 1 FROM cad_robots WHERE team_id = ${Number(r.teamId)} AND season = ${Number(r.season)} AND is_main = 1) THEN 0 ELSE 1 END`;
+  try { return await deps.dbRun(sql(first), ...args); }
+  catch (e: any) {
+    if (!/idx_cad_robots_main|UNIQUE constraint failed: cad_robots\.team_id, cad_robots\.season/i.test(String(e?.message))) throw e;
+    return deps.dbRun(sql("0"), ...args);
+  }
 }
 
 /** The robot a hand-made row (or an older client's) goes to: the main robot of the latest season, made if the team has none. */
@@ -90,8 +102,7 @@ export async function defaultRobotId(deps: Pick<CadRobotDeps, "dbGet" | "dbRun">
     `SELECT id FROM cad_robots WHERE team_id = ? ORDER BY season DESC, is_main DESC, id ASC LIMIT 1`, teamId);
   const hit = await pick();
   if (hit) return Number(hit.id);
-  const now = new Date().toISOString();
-  await deps.dbRun("INSERT INTO cad_robots (team_id, season, name, is_main, created_at, updated_at) VALUES (?, ?, 'Competition robot', 1, ?, ?)", teamId, currentSeason(), now, now);
+  await insertRobot(deps, { teamId, season: currentSeason(), name: "Competition robot" });
   return Number((await pick()).id);
 }
 
@@ -112,12 +123,14 @@ export function createCadRobots(deps: CadRobotDeps) {
   const canManage = (auth: Auth) => deps.hasPerm(auth, MANAGE_CAD);
   const memberName = async (id: number) => String((await dbGet("SELECT name FROM members WHERE id = ?", id))?.name || "A teammate");
 
+  /** A robot's parts; the team's default robot also shows any row no robot holds (written by an older client). */
   async function robotParts(teamId: number, robotId: number) {
+    const unassigned = robotId === (await defaultRobotId(deps, teamId)) ? " OR robot_id IS NULL" : "";
     const rows = await dbAll(
       `SELECT id, name, section, quantity, source, unit_cost, status, assignee, notes, created_at, updated_at, robot_id,
               ck_document_id, ck_element_id, ck_part_key, ck_import_id, ck_extra, ck_removed_at,
               choice_type, choice_type_set, choice_type_by, choice_type_at, choice_product, choice_product_by, choice_product_at
-         FROM cad_parts WHERE team_id = ? AND robot_id = ? ORDER BY name COLLATE NOCASE, id`, teamId, robotId);
+         FROM cad_parts WHERE team_id = ? AND (robot_id = ?${unassigned}) ORDER BY name COLLATE NOCASE, id`, teamId, robotId);
     return rows.map(partView);
   }
 
@@ -137,8 +150,10 @@ export function createCadRobots(deps: CadRobotDeps) {
           `SELECT robot_id, quantity, source, unit_cost, ck_extra, ck_removed_at, choice_type, choice_type_set, choice_type_at, choice_product, choice_product_at
              FROM cad_parts WHERE team_id = ?`, teamId);
         const byRobot = new Map<number, any[]>();
+        // Rows no robot holds count on the default robot, as its page shows them.
+        const fallback = robots.length ? Number(robots[0].id) : 0;
         for (const row of parts) {
-          const k = Number(row.robot_id) || 0;
+          const k = Number(row.robot_id) || fallback;
           byRobot.set(k, [...(byRobot.get(k) ?? []), partView(row)]);
         }
         const imports = await dbAll(
@@ -180,13 +195,10 @@ export function createCadRobots(deps: CadRobotDeps) {
         if (!name) return res.status(400).json({ error: "Name the robot" });
         const assembly = req.body?.assemblyUrl ? parseOnshapeAssembly(req.body.assemblyUrl) : null;
         if (req.body?.assemblyUrl && !assembly) return res.status(400).json({ error: "Paste the link of an Onshape Assembly tab" });
-        const count = await dbGet("SELECT COUNT(*) AS n, SUM(is_main) AS mains FROM cad_robots WHERE team_id = ? AND season = ?", teamId, season);
+        const count = await dbGet("SELECT COUNT(*) AS n FROM cad_robots WHERE team_id = ? AND season = ?", teamId, season);
         if (Number(count?.n) >= MAX_ROBOTS_PER_SEASON) return res.status(400).json({ error: `A season holds at most ${MAX_ROBOTS_PER_SEASON} robots` });
-        const now = new Date().toISOString();
         try {
-          const r = await dbRun(`INSERT INTO cad_robots (team_id, season, name, is_main, document_id, element_id, assembly_url, created_by, created_at, updated_at)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            teamId, season, name, Number(count?.mains) ? 0 : 1, assembly?.documentId ?? null, assembly?.elementId ?? null, assembly?.url ?? null, auth.memberId, now, now);
+          const r = await insertRobot(deps, { teamId, season, name, documentId: assembly?.documentId, elementId: assembly?.elementId, assemblyUrl: assembly?.url, memberId: auth.memberId });
           res.json({ id: Number(r.lastInsertRowid) });
         } catch { res.status(409).json({ error: "Another robot already has that assembly" }); }
       } catch (e) { console.error("CAD robot create error:", e); res.status(500).json({ error: "Internal server error" }); }
@@ -227,12 +239,20 @@ export function createCadRobots(deps: CadRobotDeps) {
         if (!sets.length && !makeMain) return res.status(400).json({ error: "Nothing to update" });
         const now = new Date().toISOString();
         const stmts: { sql: string; args: any[] }[] = [];
+        // One main robot per season (a unique index enforces it): a moving robot steps down before it changes season, and
+        // the old main steps down before another takes over.
+        const moved = season !== Number(robot.season);
+        if (moved) stmts.push({ sql: "UPDATE cad_robots SET is_main = 0 WHERE id = ?", args: [robot.id] });
         if (sets.length) stmts.push({ sql: `UPDATE cad_robots SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`, args: [...args, now, robot.id] });
-        // One main robot per season: the moved or chosen robot leads its season when asked, or when the season had none.
-        if (makeMain) stmts.push({ sql: "UPDATE cad_robots SET is_main = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE team_id = ? AND season = ?", args: [robot.id, teamId, season] });
-        else if (season !== Number(robot.season)) {
+        if (makeMain) {
+          stmts.push({ sql: "UPDATE cad_robots SET is_main = 0 WHERE team_id = ? AND season = ? AND id <> ? AND is_main = 1", args: [teamId, season, robot.id] });
+          stmts.push({ sql: "UPDATE cad_robots SET is_main = 1 WHERE id = ?", args: [robot.id] });
+        } else if (moved) {
+          // A moved robot leads its new season only when that season had none.
           stmts.push({ sql: "UPDATE cad_robots SET is_main = CASE WHEN EXISTS (SELECT 1 FROM cad_robots o WHERE o.team_id = ? AND o.season = ? AND o.id <> ? AND o.is_main = 1) THEN 0 ELSE 1 END WHERE id = ?", args: [teamId, season, robot.id, robot.id] });
-          // The season it left keeps a main robot.
+        }
+        // The season it left keeps a main robot, whichever way it moved.
+        if (moved) {
           stmts.push({ sql: `UPDATE cad_robots SET is_main = 1 WHERE id = (SELECT id FROM cad_robots WHERE team_id = ? AND season = ? ORDER BY id LIMIT 1)
                                AND NOT EXISTS (SELECT 1 FROM cad_robots WHERE team_id = ? AND season = ? AND is_main = 1)`, args: [teamId, robot.season, teamId, robot.season] });
         }
@@ -265,6 +285,21 @@ export function createCadRobots(deps: CadRobotDeps) {
           canManage: await canManage(auth), parts, summary: bomSummary(parts), imports,
         });
       } catch (e) { console.error("CAD robot detail error:", e); res.status(500).json({ error: "Internal server error" }); }
+    });
+
+    // Which robot holds a record, for old /cad-parts?id= style links (null when it is on no robot).
+    const RECORD_TABLES: Record<string, string> = { part: "cad_parts", doc: "cad_docs", review: "cad_reviews", snapshot: "cad_snapshots", import: "cad_imports" };
+    app.get("/api/cad/records/:kind/:id/robot", async (req, res) => {
+      try {
+        const auth = await deps.requireAuth(req, res);
+        if (!auth) return;
+        const teamId = teamOf(auth, res); if (!teamId) return;
+        const table = RECORD_TABLES[req.params.kind];
+        if (!table) return res.status(400).json({ error: "Unknown record" });
+        const row = await dbGet(`SELECT robot_id FROM ${table} WHERE id = ? AND team_id = ?`, Number(req.params.id), teamId);
+        if (!row) return res.status(404).json({ error: "Not found" });
+        res.json({ robotId: row.robot_id ? Number(row.robot_id) : await defaultRobotId(deps, teamId) });
+      } catch (e) { console.error("CAD record robot error:", e); res.status(500).json({ error: "Internal server error" }); }
     });
 
     // A person's choice for an imported part: its type, its product, or both. Recorded in the part's history.

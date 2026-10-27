@@ -15280,10 +15280,12 @@ NOTES>>>`;
           // Lines added to the CAD Parts List as the confirming member (anyone on the team can, like the page).
           let n = 0;
           for (const v of partLines.splice(0)) {
+            // Parts Bruno adds go to the team's latest main robot, like a hand-made part.
             const r: any = await dbRun(
-              `INSERT INTO cad_parts (team_id, name, section, quantity, source, unit_cost, status, assignee, notes, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              auth.teamId, v.name, v.section, v.quantity, v.source, v.unit_cost, v.status, v.assignee, v.notes, auth.memberId, createdAt, createdAt);
+              `INSERT INTO cad_parts (team_id, name, section, quantity, source, unit_cost, status, assignee, notes, created_by, created_at, updated_at, robot_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              auth.teamId, v.name, v.section, v.quantity, v.source, v.unit_cost, v.status, v.assignee, v.notes, auth.memberId, createdAt, createdAt,
+              await defaultRobotId({ dbGet, dbRun }, auth.teamId!));
             made("part", r?.lastInsertRowid); n++;
           }
           if (n) applied.part = (applied.part || 0) + n;

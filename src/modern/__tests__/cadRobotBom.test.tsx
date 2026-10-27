@@ -62,7 +62,7 @@ beforeEach(() => {
       return res(saved);
     }
     if (url === '/api/cad/robots/1') return res(detail());
-    if (url === '/api/cad/imports/41') return res({ robotId: 1 });
+    if (url === '/api/cad/records/import/41/robot') return res({ robotId: 1 });
     return res([]);
   });
   clearDrafts();

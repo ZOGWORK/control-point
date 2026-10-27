@@ -154,8 +154,9 @@ export function effectivePart(p: CadPartRow): EffectivePart {
       productPending = !(matched?.id === chosen.id && extra.matchStatus === 'confirmed') && !(matched?.id === chosen.id && extra.matchStatus === 'exact');
     }
   }
+  // An explicit 0 (packs charged to another line of the same SKU) is priced; only a missing total is unknown.
   const priced = num(extra.lineTotalUsd) !== null || total > 0;
-  return { type, group: groupOf(type), typeBy, typePending, product, productBy, productPending, candidates, totalUsd: priced && total > 0 ? total : null };
+  return { type, group: groupOf(type), typeBy, typePending, product, productBy, productPending, candidates, totalUsd: priced ? total : null };
 }
 
 /** An estimate for a product picked here, before Control Kit prices it: whole packs when the pack is known, else null. */

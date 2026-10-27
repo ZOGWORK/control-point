@@ -93,6 +93,11 @@ describe("seasons and choices (pure)", () => {
     // A hand-made row: its source stands for the type.
     expect(effectivePart({ id: 2, name: "Bracket", quantity: 2, unit_cost: 3, source: "printed", status: "to_order", ck_extra: null })).toMatchObject({ type: "print", typeBy: "manual-row", totalUsd: 6 });
   });
+  it("keeps an explicit zero total priced (packs charged to another line), and a missing one unknown", () => {
+    const base = { id: 1, name: "x", quantity: 4, unit_cost: 0, source: "other", status: "to_order" };
+    expect(effectivePart({ ...base, ck_extra: line("A", { disposition: "buy", lineTotalUsd: 0 }) }).totalUsd).toBe(0);
+    expect(effectivePart({ ...base, ck_extra: line("A", { disposition: "buy", lineTotalUsd: null }) }).totalUsd).toBeNull();
+  });
   it("estimates whole packs only when the pack is known", () => {
     expect(estimateUsd(candidates[0] as any, 5)).toBeCloseTo(17.97);
     expect(estimateUsd({ ...candidates[0], unitsPerPack: null } as any, 5)).toBeNull();
@@ -145,6 +150,35 @@ describe("robots by season", () => {
     const mains = (await t.db.execute({ sql: "SELECT COUNT(*) AS n FROM cad_robots WHERE team_id = ? AND season = 2025 AND is_main = 1", args: [team] })).rows[0] as any;
     expect(Number(mains.n)).toBe(1);
     expect((await t.patch(`/api/cad/robots/${practice.id}`, { assemblyUrl: "https://example.com/x" }, lead)).status).toBe(400);
+  });
+});
+
+describe("robots: edge cases", () => {
+  it("shows a row no robot holds (an older client, or Bruno before this change) on the default robot", async () => {
+    const list = (await t.api("/api/cad/robots", { session: admin })).body;
+    const comp = list.seasons.find((x: any) => x.season === 2025).robots.find((r: any) => r.isMain);
+    await t.db.execute({ sql: "INSERT INTO cad_parts (team_id, name, created_at, updated_at) VALUES (?, 'Loose bracket', '2026-10-01', '2026-10-01')", args: [team] });
+    const detail = await t.api(`/api/cad/robots/${comp.id}`, { session: admin });
+    expect(detail.body.parts.map((p: any) => p.name)).toContain("Loose bracket");
+  });
+  it("tells an old record link which robot holds the record", async () => {
+    const id = await partId("A");
+    const r = await t.api(`/api/cad/records/part/${id}/robot`, { session: student });
+    const owner = (await t.db.execute({ sql: "SELECT robot_id FROM cad_parts WHERE id = ?", args: [id] })).rows[0] as any;
+    expect(r.body.robotId).toBe(Number(owner.robot_id));
+    expect((await t.api("/api/cad/records/nope/1/robot", { session: student })).status).toBe(400);
+  });
+  it("keeps one main robot per season when robots are added, made main, and moved", async () => {
+    const mains = async (season: number) => Number(((await t.db.execute({ sql: "SELECT COUNT(*) AS n FROM cad_robots WHERE team_id = ? AND season = ? AND is_main = 1", args: [team, season] })).rows[0] as any).n);
+    const a = (await t.post("/api/cad/robots", { season: 2024, name: "Old A" }, lead)).body.id;
+    const b = (await t.post("/api/cad/robots", { season: 2024, name: "Old B" }, lead)).body.id;
+    expect(await mains(2024)).toBe(1);
+    // Moving the main robot away and making it main of its new season leaves its old season a main.
+    expect((await t.patch(`/api/cad/robots/${a}`, { season: 2023, isMain: true }, lead)).status).toBe(200);
+    expect(await mains(2024)).toBe(1);
+    expect(await mains(2023)).toBe(1);
+    expect((await t.patch(`/api/cad/robots/${b}`, { isMain: true }, lead)).status).toBe(200);
+    expect(await mains(2024)).toBe(1);
   });
 });
 

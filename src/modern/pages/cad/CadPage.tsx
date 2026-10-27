@@ -13,6 +13,8 @@ import { CadSeasons } from './CadSeasons';
 import { RobotPage } from './RobotPage';
 
 const LEGACY_TAB: Record<string, string> = { 'cad-docs': 'files', 'cad-reviews': 'reviews', 'cad-snapshots': 'snapshots', 'cad-parts': 'bom' };
+/** The record kind an old tab's ?id= names. */
+const TAB_RECORD: Record<string, string> = { files: 'doc', reviews: 'review', snapshots: 'snapshot', bom: 'part' };
 
 export function CadPage({ currentUser, isAdmin }: { activeTab?: string; currentUser?: any; isAdmin: boolean }) {
   const location = useLocation();
@@ -24,7 +26,7 @@ export function CadPage({ currentUser, isAdmin }: { activeTab?: string; currentU
   return <CadSeasons />;
 }
 
-/** An old CAD link: the robot of a linked import, else the team's latest main robot, on the matching tab. */
+/** An old CAD link: the robot holding the linked record or import, else the team's latest main robot, on the matching tab. */
 function LegacyRedirect({ tab }: { tab: string }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,8 +36,10 @@ function LegacyRedirect({ tab }: { tab: string }) {
     const imp = params.get('import');
     (async () => {
       let robotId: number | null = null;
-      if (imp && /^\d{1,12}$/.test(imp)) {
-        const r = await apiFetch(`/api/cad/imports/${imp}`).catch(() => null);
+      const record = params.get('id');
+      const named = imp && /^\d{1,12}$/.test(imp) ? `import/${imp}` : record && /^\d{1,12}$/.test(record) ? `${TAB_RECORD[tab]}/${record}` : null;
+      if (named) {
+        const r = await apiFetch(`/api/cad/records/${named}/robot`).catch(() => null);
         if (r?.ok) robotId = (await r.json()).robotId ?? null;
       }
       if (!robotId) {

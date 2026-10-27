@@ -7,8 +7,8 @@
 --     is_main. document_id/element_id link the robot's Onshape assembly, so a
 --     Control Kit send of that assembly lands on it (unique per team).
 --   robot_id on cad_parts, cad_docs, cad_reviews, cad_snapshots, cad_imports:
---     the robot a row belongs to. NULL only for a hand-made row created by an
---     older client; the app shows those under the season's main robot.
+--     the robot a row belongs to. Every new row gets one; a row left NULL (an
+--     older client) is shown on the team's default robot (latest season's main).
 --   cad_parts.choice_*: what a person chose in Control Point for an imported
 --     part. choice_type_set = 1 means a type choice exists (choice_type NULL
 --     is "let Control Kit decide"); choice_product is "vendor:normalizedSku".
@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS cad_robots (
 CREATE INDEX IF NOT EXISTS idx_cad_robots_team ON cad_robots(team_id, season);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cad_robots_assembly
   ON cad_robots(team_id, document_id, element_id) WHERE document_id IS NOT NULL;
+-- At most one main robot per team and season, whatever sends race.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cad_robots_main
+  ON cad_robots(team_id, season) WHERE is_main = 1;
 
 ALTER TABLE cad_parts ADD COLUMN robot_id INTEGER;
 ALTER TABLE cad_docs ADD COLUMN robot_id INTEGER;
