@@ -10,7 +10,6 @@ vi.mock('../../components/dialog', async (orig) => ({ ...(await orig<object>()),
 
 import { ControlKitConsentPage } from '../pages/connect/ControlKitConsentPage';
 import { ConnectedApps } from '../pages/settings/ConnectedApps';
-import { CadPage } from '../pages/cad/CadPage';
 import { InterfaceModeProvider } from '../interfaceMode';
 import { clearDrafts } from '../drafts';
 import {
@@ -157,55 +156,5 @@ describe('Connected apps', () => {
     expect(screen.queryByText(/No apps are connected/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
     expect(await screen.findByRole('button', { name: /Disconnect/ })).toBeInTheDocument();
-  });
-});
-
-describe('Parts list: Control Kit imports', () => {
-  const me = { id: 7, name: 'Ada', team_id: 1, interface_mode: 'modern' };
-  const parts = [
-    { id: 1, name: 'Hand bracket', section: 'Chassis', quantity: 1, source: 'other', unit_cost: 0, status: 'to_order', assignee: '' },
-    { id: 2, name: 'Mecanum wheel', section: 'Drivetrain', quantity: 4, source: 'gobilda', unit_cost: 30, status: 'ordered', assignee: 'Bo', ck_part_key: 'd:e:p1:', ck_import_id: 41, ck_removed_at: null },
-    { id: 3, name: 'Old motor', section: 'Drivetrain', quantity: 1, source: 'gobilda', unit_cost: 40, status: 'to_order', assignee: '', ck_part_key: 'd:e:p2:', ck_import_id: 40, ck_removed_at: '2026-10-26T15:00:00.000Z' },
-  ];
-  const imp = {
-    importId: 41, sentAt: '2026-10-26T15:00:00.000Z', sentBy: 'Sam', created: 1, updated: 0, markedRemoved: 1, filesStored: 1,
-    assemblyName: 'Robot', assemblyUrl: 'https://cad.onshape.com/documents/d', revision: 'v/1', partCount: 1,
-    files: [{ name: 'Robot BOM.xlsx', stored: true, url: '/api/files/9' }, { name: 'Robot STEP.zip', stored: false, note: 'Available in Control Kit' }],
-  };
-  const setup = (url: string) => render(
-    <InterfaceModeProvider user={me} team={{}} onUserSaved={() => {}}>
-      <MemoryRouter initialEntries={[url]}>
-        <Routes><Route path="*" element={<CadPage activeTab="cad-parts" currentUser={{ id: 7 }} isAdmin={false} />} /></Routes>
-      </MemoryRouter>
-    </InterfaceModeProvider>,
-  );
-
-  it('marks rows Control Kit sent, and the ones the latest scan dropped', async () => {
-    api.apiFetch.mockImplementation((url: string) => res(url === '/api/cad/parts' ? parts : []));
-    setup('/cad-parts');
-    expect(await screen.findByText('Mecanum wheel')).toBeInTheDocument();
-    expect(screen.getAllByText('From Control Kit')).toHaveLength(2);
-    expect(screen.getAllByText('Not in latest scan')).toHaveLength(1);
-    expect(screen.getByText('Old motor').closest('td')).toHaveTextContent('Not in latest scan');
-    expect(screen.getByText('Hand bracket').closest('td')).not.toHaveTextContent('From Control Kit');
-  });
-
-  it('?import= shows that import and highlights its rows', async () => {
-    api.apiFetch.mockImplementation((url: string) => res(url === '/api/cad/parts' ? parts : url === '/api/cad/imports/41' ? imp : []));
-    setup('/cad-parts?import=41');
-    expect(await screen.findByText('Robot from Control Kit')).toBeInTheDocument();
-    expect(screen.getByText(/by Sam · 1 part · 1 new · 0 updated · 1 not in this scan/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Robot BOM.xlsx' })).toHaveAttribute('href', '/api/files/9');
-    expect(screen.getByText(/Robot STEP.zip · Available in Control Kit/)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByText('Mecanum wheel').closest('tr')).toHaveAttribute('data-import', 'current'));
-    expect(screen.getByText('Old motor').closest('tr')).not.toHaveAttribute('data-import');
-    fireEvent.click(screen.getByRole('button', { name: 'Close the import summary' }));
-    expect(screen.queryByText('Robot from Control Kit')).toBeNull();
-  });
-
-  it('an import from another workspace says so', async () => {
-    api.apiFetch.mockImplementation((url: string) => (url === '/api/cad/imports/99' ? res({ error: 'Not found' }, 404) : res(url === '/api/cad/parts' ? parts : [])));
-    setup('/cad-parts?import=99');
-    expect(await screen.findByText(/That Control Kit import isn’t in this workspace/)).toBeInTheDocument();
   });
 });

@@ -26,13 +26,13 @@ async function ck(path: string, opts: { token?: string; body?: any; auth?: strin
 }
 
 const candidates = [
-  { id: "gobilda:1611001408", vendor: "gobilda", sku: "1611-0014-0008", normalizedSku: "1611001408", name: "1611 Flanged Bearing (8mm REX ID) - 2 Pack", priceUsd: 5.99, unitsPerPack: 2, stock: "in-stock", url: "https://www.gobilda.com/1611", image: null, kind: "match" },
-  { id: "gobilda:1611001410", vendor: "gobilda", sku: "1611-0014-0010", normalizedSku: "1611001410", name: "1611 Flanged Bearing (10mm ID) - 2 Pack", priceUsd: 5.99, unitsPerPack: 2, stock: "in-stock", url: "https://www.gobilda.com/1611b", image: null, kind: "near" },
+  { id: "gobilda:1611001408", vendor: "gobilda", sku: "1611-0014-0008", normalizedSku: "1611001408", name: "1611 Flanged Bearing (8mm REX ID) - 2 Pack", priceUsd: 5.99, unitsPerPack: 2, stock: "in", url: "https://www.gobilda.com/1611", image: null, kind: "match" },
+  { id: "gobilda:1611001410", vendor: "gobilda", sku: "1611-0014-0010", normalizedSku: "1611001410", name: "1611 Flanged Bearing (10mm ID) - 2 Pack", priceUsd: 5.99, unitsPerPack: 2, stock: "in", url: "https://www.gobilda.com/1611b", image: null, kind: "near" },
 ];
 const line = (part: string, over: Record<string, unknown> = {}) => ({
   key: `line-${part}`, identity: `doc1:ps:${part}:default`, documentId: "doc1", elementId: "ps", partId: part, configuration: "default", name: `Part ${part}`, qty: 4,
   disposition: "review", dispositionSource: "none", manualOverride: null, manualOverrideAt: null, matchStatus: "possible", vendor: "gobilda", matchNormalizedSku: "1611001408",
-  sku: "1611-0014-0008", packPriceUsd: 5.99, unitsPerPack: 2, lineTotalUsd: null, stock: "in-stock", candidates, ...over,
+  sku: "1611-0014-0008", packPriceUsd: 5.99, unitsPerPack: 2, lineTotalUsd: null, stock: "in", candidates, ...over,
 });
 const cadPart = (part: string, over: Record<string, unknown> = {}) => ({
   name: `Part ${part}`, section: "Other", quantity: 4, source: "other", unit_cost: 0, status: "to_order", notes: "", extra: line(part, over),

@@ -304,16 +304,7 @@ const navItems = [
   { id: 'tasks', path: 'tasks', labelKey: 'nav.tasks', icon: CheckSquare, group: 'Engineering' },
   { id: 'inventory', path: 'inventory', labelKey: 'nav.inventory', icon: Zap, scope: 'inventory', group: 'Engineering' },
   { id: 'checklists', path: 'checklists', labelKey: 'nav.checklists', icon: ClipboardList, group: 'Engineering' },
-  {
-    id: 'cad', path: 'cad', labelKey: 'nav.cad', icon: Box, group: 'Engineering',
-    children: [
-      { id: 'cad', path: 'cad', labelKey: 'nav.cadDashboard', icon: Box },
-      { id: 'cad-docs', path: 'cad-docs', labelKey: 'nav.onshapeDocs', icon: FileBox },
-      { id: 'cad-reviews', path: 'cad-reviews', labelKey: 'nav.designReviews', icon: ClipboardCheck },
-      { id: 'cad-snapshots', path: 'cad-snapshots', labelKey: 'nav.snapshots', icon: Layers },
-      { id: 'cad-parts', path: 'cad-parts', labelKey: 'nav.partsList', icon: Package },
-    ],
-  },
+  { id: 'cad', path: 'cad', labelKey: 'nav.cad', icon: Box, group: 'Engineering' },
   { id: 'code', path: 'code', labelKey: 'nav.code', icon: Code2, scope: 'code', group: 'Engineering' },
   { id: 'outreach', path: 'outreach', labelKey: 'nav.outreach', icon: Globe, group: 'Outreach' },
   { id: 'budget', path: 'budget', labelKey: 'nav.budget', icon: Wallet, scope: 'budget', group: 'Outreach' },
@@ -2349,6 +2340,7 @@ export default function App() {
         <Route path="/code" element={<CodePage {...viewProps} />} />
         <Route path="/notebook/*" element={<NotebookPage activeTeamId={currentTeamId} currentUserId={currentUser?.id} />} />
         <Route path="/cad" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
+        <Route path="/cad/robots/:robotId" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-docs" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-reviews" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-snapshots" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
