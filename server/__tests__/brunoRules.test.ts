@@ -9,6 +9,11 @@ import { BUILD_HELPER_SYSTEM } from "../../ai";
 import { formatWorkspaceFacts } from "../workspaceFacts";
 
 describe("Bruno's rules", () => {
+  it("stays on FTC: no essays or homework for class, even in part", () => {
+    expect(BUILD_HELPER_SYSTEM).toMatch(/STAY ON FTC/);
+    expect(BUILD_HELPER_SYSTEM).toMatch(/never write essays, stories, poems, speeches or reports for class, solve math or science homework/);
+    expect(BUILD_HELPER_SYSTEM).toMatch(/do no part of it: no outline, no first paragraph, no worked answer/);
+  });
   it("speaks like a coach, not about its machinery", () => {
     expect(BUILD_HELPER_SYSTEM).toMatch(/don't mention blocks, fences, tools, lookups or your context/);
   });

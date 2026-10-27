@@ -200,3 +200,53 @@ describe("Sister-app suggestions (server/suiteSuggestions.ts)", () => {
     expect(r.shown).not.toMatch(/Control (Scout|Kit)/);
   });
 });
+
+describe("schoolwork that isn't for the team", () => {
+  async function flagsFor(excerpt: string) {
+    // Flagging runs beside the reply; give it a moment to land.
+    for (let i = 0; i < 20; i++) {
+      const rows = (await t.db.execute({ sql: "SELECT reason FROM ai_flags WHERE excerpt = ?", args: [excerpt] })).rows;
+      if (rows.length) return rows.map((r: any) => r.reason);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return [];
+  }
+
+  it("an essay for class is declined without asking the model, and flagged for the owner", async () => {
+    gemini.script = ["Chocolate milk is more than just a nostalgic childhood beverage…"];
+    const r = await ask("write an essay on chocolate milk");
+    expect(r.status).toBe(200);
+    expect(gemini.requests).toHaveLength(0);
+    expect(r.shown).toMatch(/I can't write essays or do homework for school/);
+    expect(r.saved).toBe(r.shown);
+    expect(await flagsFor("write an essay on chocolate milk")).toEqual(["homework"]);
+  });
+
+  it("math homework is declined too", async () => {
+    const r = await ask("solve 3x + 5 = 20 for my algebra homework");
+    expect(gemini.requests).toHaveLength(0);
+    expect(r.shown).toMatch(/I stick to robotics and your team's work/);
+  });
+
+  it("a math follow-up in a chat about the robot still reaches Bruno", async () => {
+    gemini.script = ["x = 7, so the wheel turns 7 times."];
+    const chat = await t.post("/api/bruno/chats", {}, session);
+    const headers = new Headers({ "Content-Type": "application/json", "X-CP-Client": "1" });
+    withSession(headers, session);
+    const messages = [
+      { role: "user", text: "how do I convert odometry encoder ticks to inches?" },
+      { role: "model", text: "Divide ticks by ticks per revolution, then multiply by the wheel circumference." },
+      { role: "user", text: "now solve for x: 2x - 4 = 10" },
+    ];
+    const res = await fetch(`${t.base}/api/ai/build-helper?stream=true`, { method: "POST", headers, body: JSON.stringify({ messages, chatId: chat.body.id }) });
+    expect(await res.text()).toMatch(/x = 7/);
+    expect(gemini.requests).toHaveLength(1);
+  });
+
+  it("writing for the team still reaches Bruno", async () => {
+    gemini.script = ["Here's a draft for your Inspire portfolio page."];
+    const r = await ask("help me write an essay for our robotics portfolio");
+    expect(gemini.requests).toHaveLength(1);
+    expect(r.saved).toBe("Here's a draft for your Inspire portfolio page.");
+  });
+});

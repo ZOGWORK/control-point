@@ -84,6 +84,7 @@ import { serveDist } from "./server/staticAssets.js";
 import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom } from "./server/sharedAccounts.js";
 import { createReliabilityClient } from "./server/scoutReliability.js";
 import { estimateTokens, fitToRequestBytes, fitToWindow, geminiInputTokens, anthropicInputTokens, providerTooLargeMessage, sanitizeBrunoAttachments } from "./server/brunoInput.js";
+import { homeworkScore, isOffTopicSchoolwork, OFF_TOPIC_REPLY } from "./server/brunoScope.js";
 import { BRUNO_REQUEST_LIMIT_BYTES, attachedMarker, splitBrunoMessage, tooLargeMessage, typedText } from "./src/utils/brunoFiles.js";
 import { currentWeather } from "./server/weather.js";
 import { registerScoutingRoutes } from "./server/scouting.js";
@@ -13197,24 +13198,14 @@ Rules:
     }
   }
 
-  // Heuristic misuse signals. Flags are review-only — nothing auto-blocks.
-  const HOMEWORK_SIGNALS: [RegExp, number][] = [
-    [/\bhomework\b/i, 2], [/\bassignment\b/i, 2], [/\bessay\b/i, 2],
-    [/\bquiz\b/i, 2], [/\btest answers\b/i, 3], [/\bmath problem\b/i, 2],
-    [/write my\b/i, 3], [/do my (homework|assignment|essay|quiz)\b/i, 3],
-    [/solve (this|these|the|for me)\b/i, 2], [/answer (this|these|the) (question|problem)/i, 2],
-    [/summarize (this|the) (article|chapter|book|passage|reading)\b/i, 2],
-    [/complete (this|the|my) (worksheet|assignment|homework)\b/i, 3],
-  ];
-  const HOMEWORK_FLAG_THRESHOLD = 4;
-
-  async function flagMisuse(memberId: number, teamId: number | null, chatId: number | null, text: string) {
+  // Heuristic misuse signals. Flags are review-only; the schoolwork Bruno
+  // refuses (server/brunoScope.ts) is what flags as homework.
+  async function flagMisuse(memberId: number, teamId: number | null, chatId: number | null, text: string, earlier: string[] = []) {
     try {
       const excerpt = String(text || "").slice(0, 400);
       // 1) Homework-like request
-      let score = 0;
-      for (const [re, pts] of HOMEWORK_SIGNALS) if (re.test(text)) score += pts;
-      if (score >= HOMEWORK_FLAG_THRESHOLD) {
+      const score = homeworkScore(text);
+      if (isOffTopicSchoolwork(text, earlier)) {
         const dup = (await dbGet(
           "SELECT id FROM ai_flags WHERE member_id = ? AND reason = 'homework' AND status = 'open' AND created_at >= datetime('now', '-6 hours')",
           memberId
@@ -14121,9 +14112,11 @@ NOTES>>>`;
       // Misuse heuristics run async (never blocks the reply); flags land in the owner review queue.
       // The owner's own testing is never flagged — reviewing your own flags is noise.
       const reqChatId = parseInt(req.body?.chatId, 10) || null;
+      // What the member said earlier in this chat: a follow-up to a robot question isn't homework.
+      const earlierAsks = messages.slice(0, -1).filter((m: any) => m.role === "user").map((m: any) => typedText(m.text));
       const callerIsOwner = ownerEmails().includes(((auth.email) || "").toLowerCase());
       if (!callerIsOwner) {
-        flagMisuse(auth.memberId, auth.teamId, reqChatId, typedText(messages[messages.length - 1].text));
+        flagMisuse(auth.memberId, auth.teamId, reqChatId, typedText(messages[messages.length - 1].text), earlierAsks);
       }
       const globalMax = await getMaxTokens("max_tokens_chat", 1024);
       const memberCap = (await dbGet("SELECT ai_max_tokens_reply, bruno_output_level FROM members WHERE id = ?", auth.memberId)) as any;
@@ -14303,6 +14296,17 @@ NOTES>>>`;
           (await dbRun("UPDATE bruno_chats SET title = ? WHERE id = ?", (autoTitle || "New chat") + (named.length > 45 ? "…" : ""), chat.id));
         }
         (await dbRun("UPDATE bruno_chats SET updated_at = datetime('now') WHERE id = ?", chat.id));
+      }
+      // Bruno stays on FTC: plain schoolwork (an essay, a math problem for
+      // class) gets a short refusal without a model call. It was flagged above.
+      if (isOffTopicSchoolwork(typedText(messages[messages.length - 1].text), earlierAsks)) {
+        if (chat) await dbRun("INSERT INTO bruno_messages (chat_id, role, text) VALUES (?, 'model', ?)", chat.id, OFF_TOPIC_REPLY);
+        if (stream) {
+          res.setHeader("Content-Type", "text/plain; charset=utf-8");
+          res.setHeader("Cache-Control", "no-cache");
+          return res.end(OFF_TOPIC_REPLY);
+        }
+        return res.json({ result: OFF_TOPIC_REPLY, chatId: chat ? chat.id : undefined });
       }
       // Bruno lookups (phase 4b): a reply that ends with a ```lookup block asks
       // for team data. Run it for this team and let Bruno answer from the rows
