@@ -1,13 +1,14 @@
 // Modern Owner console (phase 9a), rebuilt on the shadcn kit over the shared
 // useOwner hooks (same /api/owner/* endpoints and confirmations as Legacy).
 // Tabs: Overview (what needs you, email health, workspaces), Users, AI
-// control, Flags, Feedback, Errors and What's new; a user sheet holds the AI
-// kill switch, timeouts, budgets, warnings, move and the danger zone.
+// control, Features (owner feature toggles), Flags, Feedback, Errors and
+// What's new; a user sheet holds the AI kill switch, timeouts, budgets,
+// warnings, move and the danger zone.
 import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { Bar, CartesianGrid, ComposedChart, Line, XAxis, YAxis } from 'recharts';
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Ban, Bug, Building2, ChevronRight, Mail, RefreshCw, Sparkles, Clock, FileText, Flag, LayoutGrid, List, MessageSquare, MessageSquareHeart, Search, ShieldCheck, Timer, Trash2, UserCircle, UserX, Users, Zap,
+  AlertTriangle, ArrowDown, ArrowUp, Ban, Bug, Building2, ChevronRight, Mail, RefreshCw, Sparkles, Clock, FileText, Flag, LayoutGrid, List, MessageSquare, MessageSquareHeart, Search, ShieldCheck, Timer, ToggleRight, Trash2, UserCircle, UserX, Users, Zap,
 } from 'lucide-react';
 import { cn } from '../../../components/cn';
 import {
@@ -25,6 +26,7 @@ import { MemberAvatar } from '../tasks/AssigneePicker';
 import { apiFetch } from '../../../services/api';
 import { notify, promptDialog } from '../../../components/dialog';
 import { ChangelogTab } from './ChangelogTab';
+import { FeaturesTab } from './FeaturesTab';
 import { PageViewsSection } from './PageViewsSection';
 
 type Ctl = ReturnType<typeof useOwnerConsole>;
@@ -64,6 +66,7 @@ export function OwnerPage() {
             <TabsTrigger value="overview" className="shrink-0 max-sm:h-11"><Building2 /> Overview</TabsTrigger>
             <TabsTrigger value="users" className="shrink-0 max-sm:h-11"><Users /> Users</TabsTrigger>
             <TabsTrigger value="ai" className="shrink-0 max-sm:h-11"><Zap /> AI control</TabsTrigger>
+            <TabsTrigger value="features" className="shrink-0 max-sm:h-11"><ToggleRight /> Features</TabsTrigger>
             <TabsTrigger value="flags" className="shrink-0 max-sm:h-11"><Flag /> Flags{ctl.openFlagCount > 0 && <Badge variant="destructive" className="ml-1">{ctl.openFlagCount}</Badge>}</TabsTrigger>
             <TabsTrigger value="feedback" className="shrink-0 max-sm:h-11"><MessageSquareHeart /> Feedback{ctl.totals.new_feedback > 0 && <Badge variant="soft" className="ml-1">{ctl.totals.new_feedback}</Badge>}</TabsTrigger>
             <TabsTrigger value="errors" className="shrink-0 max-sm:h-11"><Bug /> Errors</TabsTrigger>
@@ -77,6 +80,7 @@ export function OwnerPage() {
           {ctl.tab === 'overview' && <PageViewsSection refreshKey={refreshKey} />}
           {ctl.tab === 'users' && <UsersTab ctl={ctl} />}
           {ctl.tab === 'ai' && <AiTab ctl={ctl} />}
+          {ctl.tab === 'features' && <FeaturesTab refreshKey={refreshKey} />}
           {ctl.tab === 'flags' && <FlagsTab ctl={ctl} />}
           {ctl.tab === 'feedback' && <FeedbackTab ctl={ctl} />}
           {ctl.tab === 'errors' && <ErrorsTab refreshKey={refreshKey} />}

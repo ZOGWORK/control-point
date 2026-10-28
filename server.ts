@@ -31,6 +31,7 @@ import { parseRevProduct, revTarget, type RevProduct } from "./server/revImport.
 import { MAX_PURCHASE_URL, SUPPLIERS, cleanPurchaseUrl, detectSupplier, supplierById } from "./src/utils/suppliers.js";
 import { dbGet, dbAll, dbRun, dbExec, dbBatch, dbBatchResults } from "./db.js";
 import { countArticleView, registerPageViewRoutes } from "./server/pageViews.js";
+import { FeatureFlags, featureDisabledBody, registerFeatureRoutes } from "./server/features.js";
 import { runMigrations } from "./migrations/runner.js";
 import {
   isEmailVerified,
@@ -2635,6 +2636,8 @@ async function startServer() {
       if (client.readyState === WebSocket.OPEN && (client as any).teamId === teamId) client.send(payload);
     });
   };
+  // Owner feature toggles (server/features.ts): read on every check, so a flip applies at once.
+  const featureFlags = new FeatureFlags();
 
   // Board-only tasks are for people who manage members — the task page's
   // rule (V5 audit M2: they used to reach everyone through the API, live
@@ -3033,6 +3036,11 @@ async function startServer() {
           // anyone, including admins in admin-only channels).
           const sender = (await dbGet("SELECT id, team_id, name FROM members WHERE id = ? AND COALESCE(is_active, 1) = 1", socketMemberId)) as any;
           if (!sender || sender.team_id !== teamId) return;
+          // The owner turned messaging off for this team: nothing is stored, sent or notified.
+          if (!(await featureFlags.isEnabled(teamId, "messaging"))) {
+            try { ws.send(JSON.stringify({ type: "chat_denied", client_id: message.client_id || null, error: "Messaging is turned off for your team" })); } catch {}
+            return;
+          }
           message.sender_id = sender.id;
           message.sender_name = sender.name;
           // Channel must belong to this team; default to #general
@@ -5386,6 +5394,9 @@ async function startServer() {
       { sql: "DELETE FROM checkin_sessions WHERE team_id = ?", args: [teamId] },
       // References teams without a cascade.
       { sql: "DELETE FROM call_moderation_log WHERE team_id = ?", args: [teamId] },
+      // Owner feature toggles: the override goes; the audit trail keeps the flip, without the workspace.
+      { sql: "DELETE FROM team_feature_overrides WHERE team_id = ?", args: [teamId] },
+      { sql: "UPDATE feature_flag_audit SET team_id = NULL WHERE team_id = ?", args: [teamId] },
       // No foreign key, but they belong to this workspace.
       { sql: "DELETE FROM access_code_events WHERE team_id = ?", args: [teamId] },
       { sql: `DELETE FROM ai_warnings WHERE team_id = ? OR member_id ${inMembers}`, args: [teamId, ...memberIds] },
@@ -8060,6 +8071,20 @@ async function startServer() {
     res.json({ success: true, count });
   });
 
+  // Messaging switched off by the owner for this team: every chat route,
+  // reads included, answers 403 (history stays; switching it on restores it).
+  app.use(["/api/messages", "/api/chat"], async (req, res, next) => {
+    try {
+      const auth = await getAuth(req);
+      if (auth?.teamId != null && !(await featureFlags.isEnabled(auth.teamId, "messaging"))) {
+        return res.status(403).json(featureDisabledBody("messaging"));
+      }
+    } catch (e) {
+      console.error("messaging feature check failed:", e);
+    }
+    next();
+  });
+
   // Messages
   app.get("/api/messages", async (req, res) => {
     const auth = await requireAuth(req, res);
@@ -8127,6 +8152,16 @@ async function startServer() {
   });
   // Public pages only: a cookieless daily pageview counter (the owner can read it).
   const pageViews = registerPageViewRoutes(app, { requireOwner });
+  // Owner feature toggles: GET /api/features for members, /api/owner/features* for the owner.
+  registerFeatureRoutes(app, {
+    requireAuth, requireOwner, flags: featureFlags,
+    // Open clients re-read their features: one team, or everyone for a global flip.
+    notify: (teamId) => {
+      if (teamId != null) return broadcastToTeam(teamId, { type: "features_changed" });
+      const payload = JSON.stringify({ type: "features_changed" });
+      clients.forEach((c) => { if (c.readyState === WebSocket.OPEN && (c as any).teamId != null) c.send(payload); });
+    },
+  });
 
   // ---- Manual scouting (works with no FTC data; synced from devices) ----
   registerScoutingRoutes(app, {
@@ -9463,9 +9498,12 @@ Rules:
   };
 
   // Everyone (signed in or not) reads the releases; there's nothing private in them.
-  app.get("/api/changelog", async (_req, res) => {
+  // A team the owner switched What's new off for gets none (nothing to pop up).
+  app.get("/api/changelog", async (req, res) => {
     try {
-      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Cache-Control", "private, no-cache");
+      const auth = await getAuth(req).catch(() => null);
+      if (auth?.teamId != null && !(await featureFlags.isEnabled(auth.teamId, "whats_new"))) return res.json([]);
       res.json((await listChangelog()).map(({ id, updated_at, posted_at, ...e }) => e));
     } catch (error) {
       console.error("Error reading changelog:", error);
@@ -12010,9 +12048,11 @@ Rules:
         "SELECT id, title, date, start_time, end_time, location, event_type FROM events WHERE team_id = ? AND date >= ? AND date <= ? ORDER BY date ASC, COALESCE(NULLIF(start_time, ''), '00:00') ASC LIMIT 12",
         teamId, today, weekEnd,
       )) as any[];
-      // Announcements: the latest posts in #announcements from the last two weeks.
+      // Announcements: the latest posts in #announcements from the last two
+      // weeks (none while the owner has messaging off for this team).
       const since = new Date(Date.now() - 14 * 86_400_000).toISOString();
-      const posts = (await (dbAll(
+      const messagingOn = await featureFlags.isEnabled(teamId, "messaging").catch(() => true);
+      const posts = !messagingOn ? [] : (await (dbAll(
         `SELECT m.content, m.timestamp, mem.name AS sender FROM messages m JOIN chat_channels c ON c.id = m.channel_id JOIN members mem ON mem.id = m.sender_id
           WHERE m.team_id = ? AND c.team_id = m.team_id AND LOWER(c.name) = 'announcements' AND m.deleted_at IS NULL AND m.timestamp >= ?
           ORDER BY m.timestamp DESC LIMIT 3`,
@@ -14380,7 +14420,7 @@ NOTES>>>`;
           gatedStickyLookup(allowed, (q) => stickyLookup(brunoStickyNotes, teamId, auth.memberId, q.query, q.note)),
           // Only rows that came back count as "shown" for references (not request headings or failures).
           (ids) => { for (const id of ids) shownRefs.add(id); },
-          seesBoard) : "";
+          seesBoard, !(await featureFlags.isEnabled(teamId, "messaging"))) : "";
         if (opts.signal.aborted) return null;
         const secondMessages = [
           ...messages,

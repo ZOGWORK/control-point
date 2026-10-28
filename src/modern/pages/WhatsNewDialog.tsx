@@ -8,6 +8,7 @@ import { cn } from '../../components/cn';
 import { Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui-kit';
 import { type ChangelogEntry } from '../../utils/changelog';
 import { useChangelog } from '../../utils/changelogStore';
+import { useFeature } from '../../utils/features';
 import { markVersionSeen } from '../../components/WhatsNewModal';
 
 const SECTIONS = [
@@ -35,9 +36,12 @@ function Release({ entry }: { entry: ChangelogEntry }) {
   );
 }
 
-export function WhatsNewDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function WhatsNewDialog({ open: requested, onClose }: { open: boolean; onClose: () => void }) {
   // The owner's releases (Owner console → What's new), built-in list until they load.
   const CHANGELOG = useChangelog();
+  // Never shown while the app owner has What's new off for this team.
+  const on = useFeature('whats_new');
+  const open = requested && on;
   const CURRENT_VERSION = CHANGELOG[0]?.version || '';
   const [version, setVersion] = useState(CHANGELOG[0]?.version);
   useEffect(() => { if (open) { markVersionSeen(); setVersion(CHANGELOG[0]?.version); } }, [open, CURRENT_VERSION]);

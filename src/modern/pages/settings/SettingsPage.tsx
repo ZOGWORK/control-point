@@ -25,6 +25,7 @@ import { ReactionsSection } from './ReactionsSection';
 import { WhatsNewDialog } from '../WhatsNewDialog';
 import { hasUnseenUpdate } from '../../../components/WhatsNewModal';
 import { useChangelog } from '../../../utils/changelogStore';
+import { useFeature } from '../../../utils/features';
 
 export type SettingsSectionId = 'profile' | 'appearance' | 'notifications' | 'reactions' | 'calls' | 'bruno' | 'offline' | 'account' | 'workspace' | 'members' | 'roles' | 'admin';
 
@@ -70,6 +71,8 @@ export function SettingsPage(props: any) {
   const releases = useChangelog();
   const [opened, setOpened] = useState(false);
   const unseen = !opened && hasUnseenUpdate();
+  // Hidden while the app owner has What's new off for this team.
+  const whatsNewOn = useFeature('whats_new');
   // Like Discord: Esc closes Settings (back where you came from), unless a
   // dialog, menu or text field has it.
   const navigate = useNavigate();
@@ -132,7 +135,7 @@ export function SettingsPage(props: any) {
                 </li>
               );
             })}
-            <li className="shrink-0">
+            {whatsNewOn && <li className="shrink-0">
               <p className="mb-1 mt-5 hidden truncate px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground lg:block">{k('groupAbout')}</p>
               <button
                 type="button"
@@ -144,7 +147,7 @@ export function SettingsPage(props: any) {
                 {releases[0] && <span className="relative ml-auto text-xs tabular-nums text-muted-foreground max-lg:ml-0">v{releases[0].version}</span>}
                 {unseen && <span className="relative size-2 shrink-0 rounded-full bg-accent" aria-label={k('whatsNewUnseen')} />}
               </button>
-            </li>
+            </li>}
           </ul>
         </nav>
         <div className="min-w-0">
