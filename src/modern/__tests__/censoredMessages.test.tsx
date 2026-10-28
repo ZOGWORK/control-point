@@ -44,6 +44,27 @@ describe('swear words in messages', () => {
     expect(document.body.textContent).toMatch(/the intake is shit today/);
   });
 
+  it('a swear word in a mention or a link label is hidden too; the link still goes where it goes', () => {
+    row('@[shit] see https://example.com/fuck', true);
+    expect(screen.getByRole('link').getAttribute('href')).toBe('https://example.com/fuck');
+    // The link label is masked even for 18+ (a tap opens the link, not the word).
+    expect(screen.getByRole('link').textContent).not.toMatch(/fuck/);
+    expect(screen.getByRole('button', { name: 'Hidden word, tap to show' })).toBeInTheDocument();
+  });
+
+  it('an edited message hides its new word again, even after the old one was shown', () => {
+    const view = (content: string) => (
+      <AdultContext.Provider value>
+        <CensoredText text={content} />
+      </AdultContext.Provider>
+    );
+    const { rerender } = render(view('this is shit'));
+    fireEvent.click(screen.getByRole('button', { name: 'Hidden word, tap to show' }));
+    expect(document.body.textContent).toBe('this is shit');
+    rerender(view('this is fuck'));
+    expect(screen.getByRole('button', { name: 'Hidden word, tap to show' })).toBeInTheDocument();
+  });
+
   it('mentions and links still work around a hidden word', () => {
     row('@[Ada] fuck, see https://example.com', false);
     expect(screen.getByText('@Ada')).toBeInTheDocument();

@@ -35,7 +35,7 @@ function HiddenWord({ word, adult }: { word: string; adult: boolean }) {
 export function censorText(text: string, adult: boolean, keyPrefix = 'c'): ReactNode {
   const parts = censorParts(text);
   if (!parts.some((p) => p.hidden)) return text;
-  return parts.map((p, i) => (p.hidden ? <HiddenWord key={`${keyPrefix}-${i}`} word={p.text} adult={adult} /> : p.text));
+  return parts.map((p, i) => (p.hidden ? <HiddenWord key={`${keyPrefix}-${i}-${p.text}`} word={p.text} adult={adult} /> : p.text));
 }
 
 /** `preview`: inside a button or a one-line preview, where a word can't be

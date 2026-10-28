@@ -11,6 +11,7 @@ import {
   SelectTrigger, SelectValue, Switch, Textarea,
 } from '../../components/ui-kit';
 import { FEEDBACK_ACCEPT, FEEDBACK_TOPICS, useCookieConsent, useFeedbackForm, useInstallPrompt } from '../../components/overlays/useOverlays';
+import { CensoredText } from '../../components/CensoredText';
 
 const rise = { initial: { opacity: 0, y: 16 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: 16 }, transition: { duration: 0.25, ease: [0.2, 0.8, 0.2, 1] as const } };
 
@@ -188,7 +189,7 @@ export function MentionToastCard({ toast, channelName, canJump, onJump, onDismis
             <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/15"><AtSign className="size-4 text-accent" /></span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium">Mentioned{channelName ? ` in #${channelName}` : ''}</p>
-              <p className="mt-0.5 line-clamp-3 text-sm text-muted-foreground">{toast.content}</p>
+              <p className="mt-0.5 line-clamp-3 text-sm text-muted-foreground"><CensoredText text={String(toast.content || '')} preview /></p>
             </div>
             <Button variant="ghost" size="icon" onClick={onDismiss} aria-label="Dismiss" className="-mr-2 -mt-2 size-11"><X /></Button>
           </div>

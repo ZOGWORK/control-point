@@ -36,6 +36,12 @@ describe("18 or older", () => {
     expect((await t.api("/api/auth/adult", { method: "PUT", body: JSON.stringify({ adult: true }) })).status).toBe(401);
   });
 
+  it("a signup that fails saves nothing", async () => {
+    const r = await t.post("/api/auth/signup", { accountType: "student", name: "Mallory", email: "victim@age.test", password: "a-strong-pass-123!", accessCode: "NOPE-NOPE", adult: true });
+    expect(r.status).toBe(400);
+    expect(await rows("victim@age.test")).toBe(0);
+  });
+
   it("a signup records the answer for a new account", async () => {
     await t.post("/api/auth/signup", { accountType: "admin", name: "Grown", email: "Grown@Age.Test", password: "a-strong-pass-123!", teamName: "Team Grown", adult: true });
     expect(await rows("grown@age.test")).toBe(1);

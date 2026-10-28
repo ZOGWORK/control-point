@@ -3266,9 +3266,10 @@ async function startServer() {
         if (weak) return res.status(400).json({ error: weak });
         hashedPassword = bcrypt.hashSync(password, 10);
       }
-      // "I'm 18 or older" (honesty system). A new account records its answer;
-      // signing up again with an existing one only ever adds a yes.
-      if (req.body?.adult === true || !priorRows.length) await setAdult({ dbRun }, cleanEmail, req.body?.adult === true);
+      // "I'm 18 or older" (honesty system), saved only once the signup has
+      // made the account (a failed or pending one leaves nothing behind). A
+      // new account records its answer; an existing one only ever adds a yes.
+      const recordAge = () => (req.body?.adult === true || !priorRows.length ? setAdult({ dbRun }, cleanEmail, req.body?.adult === true) : Promise.resolve());
 
       if (accountType === 'admin') {
         // Team identity: an FTC team number is verified against the official
@@ -3288,6 +3289,7 @@ async function startServer() {
         // code, not a session; the team row already exists, so verifying
         // later lands them right back here.
         if (!(await isEmailVerified(cleanEmail)) || !(await isProvenHash(cleanEmail, hashedPassword, { dbRun, dbGet }))) {
+          await recordAge();
           const emailSent = await sendSignupCode(cleanEmail);
           return res.json({ needsVerification: true, email: cleanEmail, emailSent });
         }
@@ -3296,6 +3298,7 @@ async function startServer() {
         const user = (await dbGet("SELECT * FROM members WHERE id = ?", mInfo.lastInsertRowid));
         await ensureOnboardingRow(cleanEmail);
         await inheritInterfaceMode(user);
+        await recordAge();
         return res.json({ user: sanitizeMember(user), sessionId, team: { id: teamId, name: identity.name, access_code: code, verified: !!identity.ftcNumber } });
       }
 
@@ -3356,6 +3359,7 @@ async function startServer() {
         // hear "joined" only once the address is verified. A password the
         // owner never proved gets a code too (V5 H1).
         if (!(await isEmailVerified(cleanEmail)) || !(await isProvenHash(cleanEmail, hashedPassword, { dbRun, dbGet }))) {
+          await recordAge();
           const emailSent = await sendSignupCode(cleanEmail);
           return res.json({ needsVerification: true, email: cleanEmail, emailSent });
         }
@@ -3365,6 +3369,7 @@ async function startServer() {
         const user = (await dbGet("SELECT * FROM members WHERE id = ?", memberId));
         await ensureOnboardingRow(cleanEmail);
         await inheritInterfaceMode(user);
+        await recordAge();
         return res.json({ user: sanitizeMember(user), sessionId, team: { id: team.id, name: team.name } });
       }
 
@@ -3802,10 +3807,13 @@ async function startServer() {
       if (!cleanEmail) return res.status(400).json({ error: "Signup expired — please try again" });
       // The OAuth provider verified this address — no OTP needed. It proves
       // the email, never a password someone else set on it (V5 H1).
+      // "I'm 18 or older" (honesty system). An address nobody had proven yet
+      // gets this answer, yes or no: an earlier unverified signup can't have
+      // said yes for its owner. A proven account only ever adds a yes.
+      const provenBefore = await isEmailVerified(cleanEmail);
       await dropUnprovenPasswords(cleanEmail, { dbRun, dbGet });
       await markEmailVerified(cleanEmail);
-      // "I'm 18 or older" (honesty system): a yes is recorded; Settings can change it.
-      if (req.body?.adult === true) await setAdult({ dbRun }, cleanEmail, true);
+      if (req.body?.adult === true || !provenBefore) await setAdult({ dbRun }, cleanEmail, req.body?.adult === true);
       // Multi-team accounts: a provider-verified email may already exist — it
       // simply gains a membership row in the new/joined team. (Duplicate
       // membership in the SAME team is still rejected below.)

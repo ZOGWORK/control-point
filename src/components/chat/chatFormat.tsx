@@ -36,11 +36,12 @@ export function extractFirstUrl(text: string): string | null {
 }
 
 /** Render message text with mention pills and links. Swear words are
- *  blurred (`adult`: the reader said they're 18 or older, so may tap to show). */
+ *  blurred (`adult`: the reader said they're 18 or older, so may tap to show);
+ *  in a link's text they're masked for everyone (a tap opens the link). */
 export function renderMessageText(text: string, cls: { mention: string; link: string }, adult = false): ReactNode[] {
   return text.split(/(@\[[^\]]+\])/).map((part, i) => {
     if (part.startsWith('@[') && part.endsWith(']')) {
-      return <span key={i} className={cls.mention}>@{part.slice(2, -1)}</span>;
+      return <span key={i} className={cls.mention}>@{censorText(part.slice(2, -1), adult, `m${i}`)}</span>;
     }
     const urlParts = part.split(URL_RE);
     if (urlParts.length === 1) return <Fragment key={i}>{censorText(part, adult, `${i}`)}</Fragment>;
@@ -54,7 +55,7 @@ export function renderMessageText(text: string, cls: { mention: string; link: st
       const href = clean.startsWith('http') ? clean : `https://${clean}`;
       return (
         <span key={`${i}-${j}`}>
-          <a href={href} target="_blank" rel="noopener noreferrer" className={cls.link} onClick={(e) => e.stopPropagation()}>{clean}</a>
+          <a href={href} target="_blank" rel="noopener noreferrer" className={cls.link} onClick={(e) => e.stopPropagation()}>{censorText(clean, false, `l${i}-${j}`)}</a>
           {trail}
         </span>
       );
