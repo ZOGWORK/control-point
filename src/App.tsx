@@ -56,6 +56,7 @@ import { useWhatsNewAutoOpen } from './components/WhatsNewModal';
 import { WhatsNewDialog } from './modern/pages/WhatsNewDialog';
 import { MessagingOff } from './modern/pages/MessagingOff';
 import { featureOn, loadFeatures, useFeatureLoader, useFeatures } from './utils/features';
+import { loadChangelog } from './utils/changelogStore';
 import { InterfaceModeProvider } from './modern/interfaceMode';
 import { ModernShell } from './modern/ModernShell';
 import { CookieBar, FeedbackDialog, InstallBanner, MentionToastCard } from './modern/overlays/Overlays';
@@ -578,6 +579,11 @@ export default function App() {
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [whatsNewAuto, setWhatsNewAuto] = useWhatsNewAutoOpen();
   const closeWhatsNew = () => { setWhatsNewOpen(false); setWhatsNewAuto(false); };
+  // The release feed depends on who's asking (a team with What's new off gets
+  // none), so re-read it for a new member or team, and when it comes back on.
+  useEffect(() => {
+    if (currentUser && whatsNewOn) void loadChangelog(true);
+  }, [currentUser?.id, currentUser?.team_id, whatsNewOn]); // eslint-disable-line react-hooks/exhaustive-deps
   // Switched off by the app owner while open (or pending): it stays closed when switched back on.
   useEffect(() => { if (!whatsNewOn) { setWhatsNewOpen(false); setWhatsNewAuto(false); } }, [whatsNewOn]); // eslint-disable-line react-hooks/exhaustive-deps
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -1099,7 +1105,8 @@ export default function App() {
       ws.send(JSON.stringify({ type: 'hello' }));
       // Reconnect: anything sent while the socket was down (messages, tasks,
       // notifications, presence) was missed — resync everything.
-      if (socketWasConnected.current) fetchData();
+      // Feature toggles too: a flip while the socket was down sent no features_changed.
+      if (socketWasConnected.current) { fetchData(); void loadFeatures(); }
       socketWasConnected.current = true;
       // Voice signaling rides this socket — attach the engine's send path.
       // (Re-attached on every reconnect; attachSocket re-announces state.)
