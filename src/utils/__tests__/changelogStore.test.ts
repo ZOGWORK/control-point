@@ -23,4 +23,16 @@ describe('changelog store', () => {
     await store.loadChangelog();
     expect(store.getChangelog()).toEqual([]);
   });
+
+  it('a forced reload wins over an older answer that lands later (the feed depends on the team)', async () => {
+    const store = await import('../changelogStore');
+    let releaseOld: (v: any) => void = () => {};
+    api.apiFetch.mockReturnValueOnce(new Promise((r) => { releaseOld = r; }));
+    const old = store.loadChangelog();
+    api.apiFetch.mockResolvedValueOnce({ ok: true, json: async () => [] });
+    await store.loadChangelog(true);
+    releaseOld({ ok: true, json: async () => [{ version: '9.0.0', date: '2026-10-09', title: 'Old team', added: ['x'], improved: [], fixed: [] }] });
+    await old;
+    expect(store.getChangelog()).toEqual([]);
+  });
 });
