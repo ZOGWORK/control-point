@@ -38,6 +38,7 @@ import { Stagger, StaggerItem, Reveal } from '../ui/motion';
 import { useTheme } from '../../hooks/useTheme';
 import { Countdown, useHalfMinuteTick, useNow } from '../ui/Countdown';
 import { dueMoment } from '../../utils/countdown';
+import { CensoredText } from '../../components/CensoredText';
 
 const ACTIVITY_ROUTE: Record<ActivityItem['kind'], string> = {
   task: '/tasks', event: '/calendar', attendance: '/attendance', member: '/teams', budget: '/budget',
@@ -312,7 +313,7 @@ function NeedsAttention({ overdue, notifications, activeChannelId, checkedIn, ch
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-foreground">{r.title}</span>
-                  {r.detail && <span className="block truncate text-xs text-muted-foreground">{r.detail}</span>}
+                  {r.detail && <span className="block truncate text-xs text-muted-foreground"><CensoredText text={r.detail} preview /></span>}
                 </span>
                 <span className="hidden shrink-0 items-center rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors group-hover:border-foreground/20 sm:inline-flex">{r.action}</span>
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground sm:hidden" aria-hidden="true" />

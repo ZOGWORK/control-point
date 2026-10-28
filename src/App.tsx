@@ -55,6 +55,7 @@ import { format } from 'date-fns';
 import { useWhatsNewAutoOpen } from './components/WhatsNewModal';
 import { WhatsNewDialog } from './modern/pages/WhatsNewDialog';
 import { InterfaceModeProvider } from './modern/interfaceMode';
+import { AdultContext } from './components/CensoredText';
 import { ModernShell } from './modern/ModernShell';
 import { CookieBar, FeedbackDialog, InstallBanner, MentionToastCard } from './modern/overlays/Overlays';
 import { CallDock, CallStage, IncomingCall } from './modern/overlays/CallUi';
@@ -563,6 +564,20 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<Member | null>(null);
   // Offline FTC data on this device stays current on its own (Settings → Offline data).
   useOfflinePackAutoUpdate(!!currentUser);
+  // "I'm 18 or older" comes from /api/auth/me; sign-in and workspace switches
+  // hand back the member row without it, so fetch it when it's missing.
+  const adultKnown = typeof (currentUser as any)?.adult === 'boolean';
+  useEffect(() => {
+    if (!currentUser?.id || adultKnown) return;
+    let gone = false;
+    apiFetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!gone && typeof d?.user?.adult === 'boolean') setCurrentUser((prev: any) => (prev ? { ...prev, adult: d.user.adult } : prev));
+      })
+      .catch(() => { /* hidden words stay masked */ });
+    return () => { gone = true; };
+  }, [currentUser?.id, adultKnown]);
   const [isOwner, setIsOwner] = useState(false);
   // The owner check has answered (so /owner opened directly isn't bounced first).
   const [ownerChecked, setOwnerChecked] = useState(false);
@@ -2609,6 +2624,7 @@ export default function App() {
         team={activeTeam}
         onUserSaved={(u: any) => setCurrentUser((prev: any) => (prev ? { ...prev, ...u } : u))}
       >
+    <AdultContext.Provider value={!!(currentUser as any)?.adult}>
     <div className="flex h-dvh overflow-hidden bg-primary">
       <DialogHost />
       {completingTask && (
@@ -2724,6 +2740,7 @@ export default function App() {
         return <SetupDialog {...setup} />;
       })()}
     </div>
+    </AdultContext.Provider>
       </InterfaceModeProvider>
     </ContextMenuProvider>
     </VoiceProvider>

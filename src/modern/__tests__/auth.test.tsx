@@ -145,7 +145,20 @@ describe('Modern signup', () => {
     fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'secret1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create workspace' }));
     await waitFor(() => expect(onDone).toHaveBeenCalledWith({ team: { id: 1 } }));
-    expect(onSignup).toHaveBeenCalledWith({ accountType: 'admin', name: 'Ada', email: 'ada@x.test', password: 'secret1', teamName: 'Hypnotic Robotics', teamNumber: '4215', accessCode: '' });
+    expect(onSignup).toHaveBeenCalledWith({ accountType: 'admin', name: 'Ada', email: 'ada@x.test', password: 'secret1', adult: false, teamName: 'Hypnotic Robotics', teamNumber: '4215', accessCode: '' });
+  });
+
+  it("student: ticking I'm 18 or older sends it with the signup", async () => {
+    const onSignup = vi.fn(async () => ({ team: { id: 2 } }));
+    render(<SignupPage mode="student" onBack={vi.fn()} onSignup={onSignup} onDone={vi.fn()} onSignIn={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Full name'), { target: { value: 'Bo' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'bo@x.test' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'secret1' } });
+    fireEvent.change(screen.getByLabelText('Confirm password'), { target: { value: 'secret1' } });
+    fireEvent.change(screen.getByLabelText('Team access code'), { target: { value: 'CP-1' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: "I'm 18 or older" }));
+    fireEvent.click(screen.getByRole('button', { name: 'Join team' }));
+    await waitFor(() => expect(onSignup).toHaveBeenCalledWith(expect.objectContaining({ accountType: 'student', email: 'bo@x.test', adult: true })));
   });
 
   it('an unknown number falls back to a typed name; a drafted name survives coming back', async () => {
@@ -217,7 +230,7 @@ describe('Modern signup', () => {
     fireEvent.change(screen.getByLabelText('Team access code'), { target: { value: 'CP-1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Join team' }));
     await waitFor(() => expect(onDone).toHaveBeenCalled());
-    expect(body('/api/auth/oauth/complete')).toEqual({ provider: 'github', token: 'tok', teamName: '', teamNumber: '', accessCode: 'CP-1', role: 'student' });
+    expect(body('/api/auth/oauth/complete')).toEqual({ provider: 'github', token: 'tok', adult: false, teamName: '', teamNumber: '', accessCode: 'CP-1', role: 'student' });
     fireEvent.click(screen.getByRole('radio', { name: /Team admin/ }));
     expect(screen.getByLabelText('FTC team number')).toBeInTheDocument();
   });

@@ -14,6 +14,7 @@ import {
 } from '../../components/ui-kit';
 import { dayBucket, notificationTarget, type NotificationActions } from '../notifications';
 import { Page, PageHeader, EmptyState } from '../ui/page';
+import { CensoredText } from '../../components/CensoredText';
 
 export function InboxPage({ notifications, actions, onOpenChannel }: {
   notifications: any[];
@@ -100,7 +101,7 @@ export function InboxPage({ notifications, actions, onOpenChannel }: {
                           <Icon className="size-4" />
                         </span>
                         <button type="button" onClick={() => open(n)} className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-                          <p className={cn('text-sm leading-relaxed', isUnread ? 'font-medium text-foreground' : 'text-muted-foreground')}>{n.content}</p>
+                          <p className={cn('text-sm leading-relaxed', isUnread ? 'font-medium text-foreground' : 'text-muted-foreground')}><CensoredText text={n.content || ''} preview /></p>
                           <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                             {n.timestamp ? format(new Date(n.timestamp), 'h:mm a') : ''}
                             {target && <span className="inline-flex items-center gap-0.5 text-foreground/70">{target.label} <ArrowUpRight className="size-3" /></span>}

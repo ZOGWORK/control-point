@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../../components/cn';
 import {
-  Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Label,
+  Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Label,
 } from '../../../components/ui-kit';
 import { oauthUrl } from '../../../services/api';
 import { controlKitConnectPending, openOAuthWindow } from '../../../utils/controlKitConnect';
@@ -411,6 +411,21 @@ function AccessCodeField({ value, onChange }: { value: string; onChange: (v: str
   );
 }
 
+// "I'm 18 or older" at signup: an honesty system (nothing is checked). Only
+// changes whether hidden swear words in team chat can be tapped open.
+function AdultCheckbox({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  const id = useId();
+  return (
+    <div className="flex items-start gap-3">
+      <Checkbox id={id} checked={checked} onCheckedChange={(v) => onChange(v === true)} className="mt-0.5" />
+      <div className="grid gap-0.5">
+        <Label htmlFor={id} className="font-normal">I'm 18 or older</Label>
+        <p className="text-xs text-muted-foreground">Optional, and on your honor. Swear words in team messages are blurred; if you're 18 or older you can tap one to read it. You can change this in Settings.</p>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Email signup
 
@@ -452,6 +467,7 @@ export function SignupPage({ mode, onBack, onSignup, onDone, onSignIn, invite }:
           {admin
             ? <TeamNumberField teamNumber={f.teamNumber} setTeamNumber={f.setTeamNumber} teamName={f.teamName} setTeamName={f.setTeamName} />
             : !viaInvite && <AccessCodeField value={f.accessCode} onChange={f.setAccessCode} />}
+          <AdultCheckbox checked={f.adult} onChange={f.setAdult} />
         </fieldset>
         {f.error && <FormError>{f.error}</FormError>}
         {f.takenNumber && (
@@ -516,6 +532,7 @@ export function OAuthSignupPage({ token, intent, provider, onBack, onDone, invit
           {f.isAdmin
             ? <TeamNumberField teamNumber={f.teamNumber} setTeamNumber={f.setTeamNumber} teamName={f.teamName} setTeamName={f.setTeamName} />
             : !f.viaInvite && <AccessCodeField value={f.accessCode} onChange={f.setAccessCode} />}
+          <AdultCheckbox checked={f.adult} onChange={f.setAdult} />
         </fieldset>
         {f.error && <FormError>{f.error}</FormError>}
         {f.takenNumber && (

@@ -83,6 +83,7 @@ import { quoteUntrusted } from "./server/scoutingContext.js";
 import { serveDist } from "./server/staticAssets.js";
 import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom } from "./server/sharedAccounts.js";
 import { createReliabilityClient } from "./server/scoutReliability.js";
+import { deleteAgeSql, isAdult, setAdult } from "./server/ageConfirm.js";
 import { estimateTokens, fitToRequestBytes, fitToWindow, geminiInputTokens, anthropicInputTokens, providerTooLargeMessage, sanitizeBrunoAttachments } from "./server/brunoInput.js";
 import { homeworkScore, isOffTopicSchoolwork, OFF_TOPIC_REPLY } from "./server/brunoScope.js";
 import { BRUNO_REQUEST_LIMIT_BYTES, attachedMarker, splitBrunoMessage, tooLargeMessage, typedText } from "./src/utils/brunoFiles.js";
@@ -3265,6 +3266,10 @@ async function startServer() {
         if (weak) return res.status(400).json({ error: weak });
         hashedPassword = bcrypt.hashSync(password, 10);
       }
+      // "I'm 18 or older" (honesty system), saved only once the signup has
+      // made the account (a failed or pending one leaves nothing behind). A
+      // new account records its answer; an existing one only ever adds a yes.
+      const recordAge = () => (req.body?.adult === true || !priorRows.length ? setAdult({ dbRun }, cleanEmail, req.body?.adult === true) : Promise.resolve());
 
       if (accountType === 'admin') {
         // Team identity: an FTC team number is verified against the official
@@ -3284,6 +3289,7 @@ async function startServer() {
         // code, not a session; the team row already exists, so verifying
         // later lands them right back here.
         if (!(await isEmailVerified(cleanEmail)) || !(await isProvenHash(cleanEmail, hashedPassword, { dbRun, dbGet }))) {
+          await recordAge();
           const emailSent = await sendSignupCode(cleanEmail);
           return res.json({ needsVerification: true, email: cleanEmail, emailSent });
         }
@@ -3292,6 +3298,7 @@ async function startServer() {
         const user = (await dbGet("SELECT * FROM members WHERE id = ?", mInfo.lastInsertRowid));
         await ensureOnboardingRow(cleanEmail);
         await inheritInterfaceMode(user);
+        await recordAge();
         return res.json({ user: sanitizeMember(user), sessionId, team: { id: teamId, name: identity.name, access_code: code, verified: !!identity.ftcNumber } });
       }
 
@@ -3352,6 +3359,7 @@ async function startServer() {
         // hear "joined" only once the address is verified. A password the
         // owner never proved gets a code too (V5 H1).
         if (!(await isEmailVerified(cleanEmail)) || !(await isProvenHash(cleanEmail, hashedPassword, { dbRun, dbGet }))) {
+          await recordAge();
           const emailSent = await sendSignupCode(cleanEmail);
           return res.json({ needsVerification: true, email: cleanEmail, emailSent });
         }
@@ -3361,6 +3369,7 @@ async function startServer() {
         const user = (await dbGet("SELECT * FROM members WHERE id = ?", memberId));
         await ensureOnboardingRow(cleanEmail);
         await inheritInterfaceMode(user);
+        await recordAge();
         return res.json({ user: sanitizeMember(user), sessionId, team: { id: team.id, name: team.name } });
       }
 
@@ -3609,7 +3618,7 @@ async function startServer() {
         user: {
           id: 0, name: ghost?.name || auth.email || "", email: auth.email || "",
           team_id: null, account_type: "student", roles: [], permissions: [],
-          teams: [], teamless: true,
+          teams: [], teamless: true, adult: await isAdult({ dbGet }, auth.email || ""),
         },
         isOwner,
       });
@@ -3633,6 +3642,7 @@ async function startServer() {
       const pm = await presenceMap([user.id]);
       (user as any).presence = pm[user.id] || "offline";
     }
+    (user as any).adult = await isAdult({ dbGet }, user?.email || "");
     res.json({ user: sanitizeMember(user), isOwner });
   });
 
@@ -3797,8 +3807,13 @@ async function startServer() {
       if (!cleanEmail) return res.status(400).json({ error: "Signup expired — please try again" });
       // The OAuth provider verified this address — no OTP needed. It proves
       // the email, never a password someone else set on it (V5 H1).
+      // "I'm 18 or older" (honesty system). An address nobody had proven yet
+      // gets this answer, yes or no: an earlier unverified signup can't have
+      // said yes for its owner. A proven account only ever adds a yes.
+      const provenBefore = await isEmailVerified(cleanEmail);
       await dropUnprovenPasswords(cleanEmail, { dbRun, dbGet });
       await markEmailVerified(cleanEmail);
+      if (req.body?.adult === true || !provenBefore) await setAdult({ dbRun }, cleanEmail, req.body?.adult === true);
       // Multi-team accounts: a provider-verified email may already exist — it
       // simply gains a membership row in the new/joined team. (Duplicate
       // membership in the SAME team is still rejected below.)
@@ -4629,6 +4644,17 @@ async function startServer() {
   };
 
   // Log out: invalidate the current session server-side
+  // "I'm 18 or older" from Settings (honesty system; nothing is verified).
+  app.put("/api/auth/adult", async (req, res) => {
+    const auth = await requireAuth(req, res);
+    if (!auth) return;
+    if (typeof req.body?.adult !== "boolean") return res.status(400).json({ error: "adult must be true or false" });
+    const email = auth.email || ((await dbGet("SELECT email FROM members WHERE id = ?", auth.memberId)) as any)?.email || "";
+    if (!email) return res.status(400).json({ error: "This account has no email" });
+    await setAdult({ dbRun }, email, req.body.adult);
+    res.json({ adult: req.body.adult });
+  });
+
   app.post("/api/auth/logout", async (req, res) => {
     // Expire the cookies first, so they're cleared even if the session
     // delete below fails.
@@ -4768,6 +4794,7 @@ async function startServer() {
         { sql: `DELETE FROM sticky_notes WHERE member_id IN (${ph})`, args: ids },
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        deleteAgeSql(email),
         // Control Kit links belong to the account's email: a later account with this address starts unlinked.
         ...deleteGrantsSql(email),
       ];
@@ -4783,6 +4810,7 @@ async function startServer() {
       await dbBatch([
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        deleteAgeSql(email),
         ...deleteGrantsSql(email),
       ]);
     }
