@@ -431,7 +431,7 @@ function describe(q: LookupQuery): string {
 
 const LOOKUP_TEXT_CAP = 12000;
 /** Run the queries for one team and format the rows for the model (capped). */
-export async function runLookups(db: DbAll, teamId: number, tz: string, queries: LookupQuery[], notebook?: NotebookLookupRunner, sticky?: (q: LookupQuery) => Promise<LookupRows>, onShown?: (ids: string[]) => void, includeBoard = false): Promise<string> {
+export async function runLookups(db: DbAll, teamId: number, tz: string, queries: LookupQuery[], notebook?: NotebookLookupRunner, sticky?: (q: LookupQuery) => Promise<LookupRows>, onShown?: (ids: string[]) => void, includeBoard = false, messagingOff = false): Promise<string> {
   const parts: string[] = [];
   // Where each record's line ends in the output, so only records whose rows
   // survive the length cap below count as shown to Bruno.
@@ -440,6 +440,11 @@ export async function runLookups(db: DbAll, teamId: number, tz: string, queries:
   const add = (text: string) => { if (parts.length) pos += 2; parts.push(text); pos += text.length; };
   for (const q of queries.slice(0, MAX_LOOKUPS)) {
     if (q.kind === "web") continue;
+    // The app owner switched messaging off for this team: chat isn't searchable.
+    if (q.kind === "messages" && messagingOff) {
+      add(`Lookup: ${describe(q)} — NOT AVAILABLE: messaging is turned off for this team. Say so; don't guess what was said in chat.`);
+      continue;
+    }
     let r: LookupRows;
     try {
       if (NOTEBOOK_KINDS.includes(q.kind)) {

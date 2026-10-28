@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { X, Sparkles, Wrench, Bug } from 'lucide-react';
 import { type ChangelogEntry } from '../utils/changelog';
 import { latestVersion, loadChangelog, useChangelog } from '../utils/changelogStore';
+import { featureOn, getFeatures, loadFeatures } from '../utils/features';
 
 const SEEN_KEY = 'controlpoint-seen-version';
 
@@ -112,7 +113,10 @@ export function useWhatsNewAutoOpen() {
     // The owner's latest release may only be known once /api/changelog answers.
     let live = true;
     const t = setTimeout(() => {
-      void loadChangelog().then(() => { if (live && hasUnseenUpdate()) setOpen(true); });
+      // Not while the app owner has What's new off for this team.
+      void Promise.all([loadChangelog(), loadFeatures()]).then(() => {
+        if (live && hasUnseenUpdate() && featureOn(getFeatures(), 'whats_new')) setOpen(true);
+      });
     }, 2500);
     return () => { live = false; clearTimeout(t); };
   }, []);

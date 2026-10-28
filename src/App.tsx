@@ -54,6 +54,9 @@ import { clearPredictCache } from './services/predictApi';
 import { format } from 'date-fns';
 import { useWhatsNewAutoOpen } from './components/WhatsNewModal';
 import { WhatsNewDialog } from './modern/pages/WhatsNewDialog';
+import { MessagingOff } from './modern/pages/MessagingOff';
+import { featureOn, loadFeatures, useFeatureLoader, useFeatures } from './utils/features';
+import { loadChangelog } from './utils/changelogStore';
 import { InterfaceModeProvider } from './modern/interfaceMode';
 import { AdultContext } from './components/CensoredText';
 import { ModernShell } from './modern/ModernShell';
@@ -428,8 +431,13 @@ export default function App() {
   }, [navigate]);
   const activeNav = navItems.find((t) => t.id === activeTab)
     || navItems.flatMap((t) => (t as any).children || []).find((c: any) => c.id === activeTab);
+  // The app owner's feature toggles for this team (Owner console → Features).
+  const features = useFeatures();
+  const messagingOn = featureOn(features, 'messaging');
+  const whatsNewOn = featureOn(features, 'whats_new');
   // Messaging is immersive: no top bar, no footer — the chat fills the whole content area
-  const isChatRoute = activeTab === 'chat';
+  // (while it's switched off, /chat is an ordinary page that says so).
+  const isChatRoute = activeTab === 'chat' && messagingOn;
   // Bruno gets the same immersive full-height treatment as chat: no app
   // header/footer, no outer scroll — the conversation fills the viewport.
   const isBrunoRoute = activeTab === 'bruno';
@@ -562,6 +570,7 @@ export default function App() {
   
   // Auth State
   const [currentUser, setCurrentUser] = useState<Member | null>(null);
+  useFeatureLoader(currentUser?.id, currentUser?.team_id);
   // Offline FTC data on this device stays current on its own (Settings → Offline data).
   useOfflinePackAutoUpdate(!!currentUser);
   // "I'm 18 or older" comes from /api/auth/me; sign-in and workspace switches
@@ -585,6 +594,13 @@ export default function App() {
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
   const [whatsNewAuto, setWhatsNewAuto] = useWhatsNewAutoOpen();
   const closeWhatsNew = () => { setWhatsNewOpen(false); setWhatsNewAuto(false); };
+  // The release feed depends on who's asking (a team with What's new off gets
+  // none), so re-read it for a new member or team, and when it comes back on.
+  useEffect(() => {
+    if (currentUser && whatsNewOn) void loadChangelog(true);
+  }, [currentUser?.id, currentUser?.team_id, whatsNewOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Switched off by the app owner while open (or pending): it stays closed when switched back on.
+  useEffect(() => { if (!whatsNewOn) { setWhatsNewOpen(false); setWhatsNewAuto(false); } }, [whatsNewOn]); // eslint-disable-line react-hooks/exhaustive-deps
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   // True once the initial session check has finished. Until then we show a
   // minimal splash — never the landing page — so a refresh never flashes the
@@ -752,9 +768,10 @@ export default function App() {
     }
   };
 
-  // Load the team's channels once signed in; remember the active channel.
+  // Load the team's channels once signed in (and again when the owner turns
+  // messaging back on); remember the active channel.
   useEffect(() => {
-    if (!currentUser || !currentUser.team_id) return;
+    if (!currentUser || !currentUser.team_id || !messagingOn) return;
     (async () => {
       // Fetch channels and categories concurrently — they don't depend on each other.
       const [ch, cats] = await Promise.all([
@@ -772,7 +789,7 @@ export default function App() {
       if (Array.isArray(cats)) setChatCategories(cats);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, currentUser?.team_id]);
+  }, [currentUser?.id, currentUser?.team_id, messagingOn]);
 
   // Load this channel's messages whenever it changes.
   useEffect(() => {
@@ -1103,7 +1120,8 @@ export default function App() {
       ws.send(JSON.stringify({ type: 'hello' }));
       // Reconnect: anything sent while the socket was down (messages, tasks,
       // notifications, presence) was missed — resync everything.
-      if (socketWasConnected.current) fetchData();
+      // Feature toggles too: a flip while the socket was down sent no features_changed.
+      if (socketWasConnected.current) { fetchData(); void loadFeatures(); }
       socketWasConnected.current = true;
       // Voice signaling rides this socket — attach the engine's send path.
       // (Re-attached on every reconnect; attachSocket re-announces state.)
@@ -1249,6 +1267,9 @@ export default function App() {
         } else if (msg.type === 'team_settings_changed') {
           // Module switches or subsystems changed: the sidebar follows live.
           void refreshTeams();
+        } else if (msg.type === 'features_changed') {
+          // The app owner flipped a feature toggle: chat and What's new follow live.
+          void loadFeatures();
         } else if (msg.type === 'member_roles_changed') {
           // Someone's roles changed — refresh the roster everywhere and
           // re-read my own permissions so the new role applies live.
@@ -1940,6 +1961,7 @@ export default function App() {
   const tabVisible = (t: any): boolean => {
     if (t.ownerOnly) return isOwner;
     if (isNavIdDisabled(t.id, disabledModules)) return false;
+    if (t.id === 'chat' && !messagingOn) return false;
     if (t.perm) return hasPerm(t.perm);
     if (isAdmin) return !t.scope || hasScope(t.scope);
     return studentTabIds.includes(t.id);
@@ -1991,10 +2013,12 @@ export default function App() {
       for (const c of (t as any).children || []) ids.add(c.id);
     }
     for (const id of ALWAYS_REACHABLE_PAGES) ids.add(id);
+    // Messaging switched off by the owner: a chat link opens a page that says so instead of bouncing home.
+    if (!messagingOn && !isNavIdDisabled('chat', disabledModules)) ids.add('chat');
     // The old CAD tabs are links into a robot's page now (CadPage redirects them); they stay reachable with CAD.
     if (ids.has('cad')) for (const id of ['cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts']) ids.add(id);
     return ids;
-  }, [visibleTabs]);
+  }, [visibleTabs, messagingOn, disabledModules]);
   useEffect(() => {
     // Opening /owner directly: wait for the owner check before deciding.
     if (activeTab === 'owner' && !ownerChecked) return;
@@ -2363,7 +2387,7 @@ export default function App() {
         <Route path="/cad-snapshots" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-parts" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/comm" element={<CommunicationPage {...viewProps} />} />
-        <Route path="/chat" element={<MessagesPage {...viewProps} memberMenuItems={memberMenuItems} />} />
+        <Route path="/chat" element={messagingOn ? <MessagesPage {...viewProps} memberMenuItems={memberMenuItems} /> : <MessagingOff />} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/checklists" element={<ChecklistsPage events={events} members={members} />} />
         <Route path="/bruno" element={<BrunoPage key={currentUser?.team_id ?? 'none'} {...viewProps} />} />
@@ -2584,7 +2608,7 @@ export default function App() {
       ...(hasPerm('edit_notebook') || isAdmin || hasPerm('manage_members') ? [{ id: 'new-notebook-page', label: 'New notebook page', group: 'Create' as const, icon: Pencil, keywords: ['note', 'write'], run: () => navigate('/notebook?action=new-page') }] : []),
     ] : []),
     ...(visibleTabs.some((t) => t.id === 'attendance') ? [{ id: 'checkin', label: 'Check in', group: 'Actions' as const, icon: CalendarCheck, keywords: ['attendance', 'qr', 'here'], run: () => navigate('/attendance') }] : []),
-    { id: 'whats-new', label: "What's new", group: 'Actions', icon: Sparkles, run: () => setWhatsNewOpen(true) },
+    ...(whatsNewOn ? [{ id: 'whats-new', label: "What's new", group: 'Actions' as const, icon: Sparkles, run: () => setWhatsNewOpen(true) }] : []),
     { id: 'feedback', label: 'Send feedback', group: 'Actions', icon: MessageSquare, run: () => setShowFeedback(true) },
     { id: 'setup', label: 'Setup guide', group: 'Actions', icon: LayoutDashboard, run: () => openSetupGuide() },
   ];
@@ -2684,9 +2708,9 @@ export default function App() {
             onOpenFeedback={() => setShowFeedback(true)}
             onReportBug={() => { setDraft('feedback:category', 'bug'); setShowFeedback(true); }}
             onSetupGuide={openSetupGuide}
-            onOpenWhatsNew={() => setWhatsNewOpen(true)}
+            onOpenWhatsNew={whatsNewOn ? () => setWhatsNewOpen(true) : undefined}
             onStatusPick={(st) => void handleStatusPick(st)}
-            predictSeen={predictSeen}
+            predictSeen={predictSeen || !whatsNewOn}
             actions={commandActions}
           />
 

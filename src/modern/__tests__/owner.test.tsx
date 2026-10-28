@@ -27,6 +27,11 @@ const DB: Record<string, any> = {
   '/api/owner/feedback': [{ id: 31, category: 'bug', status: 'new', message: 'Calendar is slow', user_name: 'Ada', user_email: 'ada@x.test', team_name: 'Robo', created_at: '2026-09-01T10:00:00Z' }],
   '/api/owner/users': USERS,
   '/api/owner/ai-flags': [{ id: 41, reason: 'homework', status: 'open', user_name: 'Ada', user_email: 'ada@x.test', member_id: 11, team_name: 'Robo', excerpt: 'write my essay', created_at: '2026-09-02T10:00:00Z' }],
+  '/api/owner/features': {
+    features: [{ key: 'messaging', label: 'Messaging', description: 'Team chat: channels and messages.', enabled: true, overrides: [{ team_id: 2, enabled: false }] }],
+    teams: [{ id: 1, name: 'Robo', number: '4215' }, { id: 2, name: 'Gears', number: null }],
+  },
+  '/api/owner/feature-audit?limit=50': [{ id: 1, key: 'messaging', scope: 'team', team_id: 2, team_name: 'Gears', enabled: false, changed_by_name: 'Owner', created_at: '2026-10-01T10:00:00Z' }],
   '/api/owner/users/11': { user: { id: 11, name: 'Ada', email: 'ada@x.test', team_name: 'Robo', team_id: 1, role: 'member', account_type: 'student', ai_daily_token_limit: 5000, google_id: 'g' }, usage14: [{ day: '2026-09-01', messages: 3, tokens: 900 }], warnings: [], flags: [], siblings: [] },
 };
 
@@ -91,6 +96,31 @@ describe('Modern Owner console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resolve' }));
     await waitFor(() => expect(screen.queryByText('Calendar is slow')).not.toBeInTheDocument());
     expect(body('/api/owner/feedback/31', 'PATCH')).toEqual({ status: 'resolved' });
+  });
+
+  it('features: global switch confirms, per-team choices apply at once, recent changes listed', async () => {
+    setup();
+    await screen.findByRole('cell', { name: /Robo/ });
+    tab(/Features/);
+    const global = await screen.findByRole('switch', { name: 'Messaging for all teams' });
+    expect(global).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/Off for 1 team/)).toBeInTheDocument();
+    expect(screen.getByText(/off for Gears/)).toBeInTheDocument();
+
+    fireEvent.click(global);
+    await waitFor(() => expect(calls('/api/owner/features/messaging', 'PATCH')).toHaveLength(1));
+    expect(dialog.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Turn messaging off for all teams? Teams with an explicit override are unaffected.' }));
+    expect(body('/api/owner/features/messaging', 'PATCH')).toEqual({ enabled: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Per-team settings' }));
+    const gears = screen.getByLabelText('Messaging for Gears');
+    expect(within(gears).getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getAllByText('Effective: Off')).toHaveLength(1);
+    const confirms = dialog.confirmDialog.mock.calls.length;
+    fireEvent.click(within(gears).getByRole('radio', { name: 'Inherit global' }));
+    await waitFor(() => expect(calls('/api/owner/features/messaging/teams/2', 'PATCH')).toHaveLength(1));
+    expect(body('/api/owner/features/messaging/teams/2', 'PATCH')).toEqual({ enabled: null });
+    expect(dialog.confirmDialog.mock.calls.length).toBe(confirms);
   });
 
   it('user sheet: kill switch, timeout, budgets, warn, move and delete', async () => {

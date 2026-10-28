@@ -62,7 +62,8 @@ export interface ModernShellProps {
   /** The floating bug button: feedback, preset to "Bug report". */
   onReportBug?: () => void;
   onSetupGuide: () => void;
-  onOpenWhatsNew: () => void;
+  /** Absent while the app owner has What's new off for this team (the menu item hides). */
+  onOpenWhatsNew?: () => void;
   onStatusPick: (status: string) => void;
   predictSeen: boolean;
   /** Extra command-menu actions (create task, check in, …). */
@@ -196,7 +197,7 @@ export function ModernShell(props: ModernShellProps) {
         onOpenBruno={then(props.onOpenBruno)}
         onOpenFeedback={then(props.onOpenFeedback)}
         onSetupGuide={then(props.onSetupGuide)}
-        onOpenWhatsNew={then(props.onOpenWhatsNew)}
+        onOpenWhatsNew={props.onOpenWhatsNew && then(props.onOpenWhatsNew)}
         onLogout={then(props.onLogout)}
         onSwitchTeam={then(props.onSwitchTeam)}
         onNavigate={then(props.onNavigate)}
@@ -713,7 +714,7 @@ function UserMenu({ collapsed, user, onOpenSettings, onLogout, onOpenFeedback, o
           {theme === 'light' ? <Moon /> : <Sun />} {theme === 'light' ? 'Dark theme' : 'Light theme'}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onOpenWhatsNew}><Sparkles /> What's new</DropdownMenuItem>
+        {onOpenWhatsNew && <DropdownMenuItem onSelect={onOpenWhatsNew}><Sparkles /> What's new</DropdownMenuItem>}
         <DropdownMenuItem onSelect={onOpenFeedback}><MessageSquareHeart /> Send feedback</DropdownMenuItem>
         <DropdownMenuItem onSelect={onSetupGuide}><Compass /> Setup guide</DropdownMenuItem>
         <DropdownMenuSeparator />
