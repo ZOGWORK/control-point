@@ -55,6 +55,7 @@ import { format } from 'date-fns';
 import { useWhatsNewAutoOpen } from './components/WhatsNewModal';
 import { WhatsNewDialog } from './modern/pages/WhatsNewDialog';
 import { InterfaceModeProvider } from './modern/interfaceMode';
+import { AdultContext } from './components/CensoredText';
 import { ModernShell } from './modern/ModernShell';
 import { CookieBar, FeedbackDialog, InstallBanner, MentionToastCard } from './modern/overlays/Overlays';
 import { CallDock, CallStage, IncomingCall } from './modern/overlays/CallUi';
@@ -2609,6 +2610,7 @@ export default function App() {
         team={activeTeam}
         onUserSaved={(u: any) => setCurrentUser((prev: any) => (prev ? { ...prev, ...u } : u))}
       >
+    <AdultContext.Provider value={!!(currentUser as any)?.adult}>
     <div className="flex h-dvh overflow-hidden bg-primary">
       <DialogHost />
       {completingTask && (
@@ -2724,6 +2726,7 @@ export default function App() {
         return <SetupDialog {...setup} />;
       })()}
     </div>
+    </AdultContext.Provider>
       </InterfaceModeProvider>
     </ContextMenuProvider>
     </VoiceProvider>

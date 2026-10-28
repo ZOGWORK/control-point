@@ -15,6 +15,7 @@ import { useDraft } from '../../modern/drafts';
 import { useVoice } from '../../voice/VoiceContext';
 import { useContextMenu } from '../contextmenu/ContextMenuProvider';
 import { postReactionToggle } from '../MessageReactions';
+import { maskProfanity } from '../../utils/profanity';
 
 export interface ChatControllerDeps {
   messages: any[]; setMessages: (v: any) => void; msgCache: React.MutableRefObject<Map<number, any[]>>; msgExhausted: React.MutableRefObject<Map<number, boolean>>;
@@ -160,7 +161,8 @@ export function useChatController({ messages, setMessages, msgCache, msgExhauste
 
   const copyMessageText = async (msg: any) => {
     try {
-      await navigator.clipboard.writeText(msg.content || '');
+      // Hidden words stay hidden in the copy for members who haven't said they're 18+.
+      await navigator.clipboard.writeText(currentUser?.adult ? (msg.content || '') : maskProfanity(msg.content || ''));
       notify('Message copied.', 'info');
     } catch {
       notify('Could not copy that message.', 'error');

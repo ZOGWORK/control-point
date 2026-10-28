@@ -2,7 +2,7 @@
 // and name on the first of a run), reply quote, forwarded label, text with
 // mention pills + links, image / file, link preview, reactions and a hover
 // (or tap) action bar.
-import { memo, useEffect, useState } from 'react';
+import { memo, useContext, useEffect, useState } from 'react';
 import { Copy, CornerUpLeft, Download, FileText, Forward, ImageOff, Pencil, SmilePlus, Trash2, X } from 'lucide-react';
 import { cn } from '../../../components/cn';
 import { Button, Textarea, Tooltip, TooltipContent, TooltipTrigger } from '../../../components/ui-kit';
@@ -11,6 +11,7 @@ import { EmojiPicker, ReactionBar } from './Reactions';
 import { extractFirstUrl, formatFileSize, renderMessageText } from '../../../components/chat/chatFormat';
 import { isImageName, isVideoName } from '../../../utils/mediaFiles';
 import { PresenceAvatar } from '../people/MembersTab';
+import { AdultContext, CensoredText } from '../../../components/CensoredText';
 
 function ChatImage({ src, alt }: { src: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -105,6 +106,7 @@ export const MessageRow = memo(function MessageRow({ msg, sender, grouped, mine,
   onOpenPicker: (id: number) => void; onClosePicker: () => void; onPick: (id: number, emoji: string) => void;
   onReactionsChange: (id: number, r: any[]) => void; onJumpTo: (id: number) => void;
 }) {
+  const adult = useContext(AdultContext);
   const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
   const fileUrl = msg.file_path ? assetUrl(msg.file_path) : null;
   const url = msg.content ? extractFirstUrl(msg.content) : null;
@@ -149,7 +151,7 @@ export const MessageRow = memo(function MessageRow({ msg, sender, grouped, mine,
           <button type="button" onClick={(e) => { e.stopPropagation(); onJumpTo(msg.reply_to_id); }} className="mb-1 flex max-w-full items-center gap-1.5 truncate text-left text-xs text-muted-foreground hover:text-foreground">
             <CornerUpLeft className="size-3 shrink-0" />
             {msg.reply_content != null
-              ? <><span className="font-medium">{msg.reply_sender_name}</span><span className="truncate">{msg.reply_content}</span></>
+              ? <><span className="font-medium">{msg.reply_sender_name}</span><span className="truncate"><CensoredText text={msg.reply_content} preview /></span></>
               : <span className="italic">Original message was deleted</span>}
           </button>
         )}
@@ -172,7 +174,7 @@ export const MessageRow = memo(function MessageRow({ msg, sender, grouped, mine,
           </div>
         ) : msg.content && (
           <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-            {renderMessageText(msg.content, { mention: 'rounded bg-accent/15 px-1 font-medium text-accent', link: 'break-all text-info underline-offset-2 hover:underline' })}
+            {renderMessageText(msg.content, { mention: 'rounded bg-accent/15 px-1 font-medium text-accent', link: 'break-all text-info underline-offset-2 hover:underline' }, adult)}
             {msg.edited_at && <span className="ml-1 text-[11px] text-muted-foreground" title={new Date(msg.edited_at).toLocaleString()}>(edited)</span>}
           </p>
         )}

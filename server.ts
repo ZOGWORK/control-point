@@ -83,6 +83,7 @@ import { quoteUntrusted } from "./server/scoutingContext.js";
 import { serveDist } from "./server/staticAssets.js";
 import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom } from "./server/sharedAccounts.js";
 import { createReliabilityClient } from "./server/scoutReliability.js";
+import { deleteAgeSql, isAdult, setAdult } from "./server/ageConfirm.js";
 import { estimateTokens, fitToRequestBytes, fitToWindow, geminiInputTokens, anthropicInputTokens, providerTooLargeMessage, sanitizeBrunoAttachments } from "./server/brunoInput.js";
 import { homeworkScore, isOffTopicSchoolwork, OFF_TOPIC_REPLY } from "./server/brunoScope.js";
 import { BRUNO_REQUEST_LIMIT_BYTES, attachedMarker, splitBrunoMessage, tooLargeMessage, typedText } from "./src/utils/brunoFiles.js";
@@ -3265,6 +3266,9 @@ async function startServer() {
         if (weak) return res.status(400).json({ error: weak });
         hashedPassword = bcrypt.hashSync(password, 10);
       }
+      // "I'm 18 or older" (honesty system). A new account records its answer;
+      // signing up again with an existing one only ever adds a yes.
+      if (req.body?.adult === true || !priorRows.length) await setAdult({ dbRun }, cleanEmail, req.body?.adult === true);
 
       if (accountType === 'admin') {
         // Team identity: an FTC team number is verified against the official
@@ -3609,7 +3613,7 @@ async function startServer() {
         user: {
           id: 0, name: ghost?.name || auth.email || "", email: auth.email || "",
           team_id: null, account_type: "student", roles: [], permissions: [],
-          teams: [], teamless: true,
+          teams: [], teamless: true, adult: await isAdult({ dbGet }, auth.email || ""),
         },
         isOwner,
       });
@@ -3633,6 +3637,7 @@ async function startServer() {
       const pm = await presenceMap([user.id]);
       (user as any).presence = pm[user.id] || "offline";
     }
+    (user as any).adult = await isAdult({ dbGet }, user?.email || "");
     res.json({ user: sanitizeMember(user), isOwner });
   });
 
@@ -3799,6 +3804,8 @@ async function startServer() {
       // the email, never a password someone else set on it (V5 H1).
       await dropUnprovenPasswords(cleanEmail, { dbRun, dbGet });
       await markEmailVerified(cleanEmail);
+      // "I'm 18 or older" (honesty system): a yes is recorded; Settings can change it.
+      if (req.body?.adult === true) await setAdult({ dbRun }, cleanEmail, true);
       // Multi-team accounts: a provider-verified email may already exist — it
       // simply gains a membership row in the new/joined team. (Duplicate
       // membership in the SAME team is still rejected below.)
@@ -4629,6 +4636,17 @@ async function startServer() {
   };
 
   // Log out: invalidate the current session server-side
+  // "I'm 18 or older" from Settings (honesty system; nothing is verified).
+  app.put("/api/auth/adult", async (req, res) => {
+    const auth = await requireAuth(req, res);
+    if (!auth) return;
+    if (typeof req.body?.adult !== "boolean") return res.status(400).json({ error: "adult must be true or false" });
+    const email = auth.email || ((await dbGet("SELECT email FROM members WHERE id = ?", auth.memberId)) as any)?.email || "";
+    if (!email) return res.status(400).json({ error: "This account has no email" });
+    await setAdult({ dbRun }, email, req.body.adult);
+    res.json({ adult: req.body.adult });
+  });
+
   app.post("/api/auth/logout", async (req, res) => {
     // Expire the cookies first, so they're cleared even if the session
     // delete below fails.
@@ -4768,6 +4786,7 @@ async function startServer() {
         { sql: `DELETE FROM sticky_notes WHERE member_id IN (${ph})`, args: ids },
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        deleteAgeSql(email),
         // Control Kit links belong to the account's email: a later account with this address starts unlinked.
         ...deleteGrantsSql(email),
       ];
@@ -4783,6 +4802,7 @@ async function startServer() {
       await dbBatch([
         { sql: "DELETE FROM members WHERE email = ?", args: [email] },
         { sql: "DELETE FROM onboarding_state WHERE email = ?", args: [normalizeOnboardingEmail(email) || ""] },
+        deleteAgeSql(email),
         ...deleteGrantsSql(email),
       ]);
     }

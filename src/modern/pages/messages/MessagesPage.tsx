@@ -16,6 +16,7 @@ import { formatDayDivider } from '../../../components/chat/chatFormat';
 import { PresenceAvatar } from '../people/MembersTab';
 import { ChannelSidebar } from './ChannelSidebar';
 import { MessageRow } from './MessageRow';
+import { CensoredText } from '../../../components/CensoredText';
 
 const GROUP_MS = 5 * 60 * 1000;
 
@@ -196,7 +197,7 @@ export function MessagesPage(props: any) {
                 {ctl.replyTo && (
                   <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
                     <CornerUpLeft className="size-3.5" /> Replying to <span className="font-medium text-foreground">{ctl.replyTo.sender_name}</span>
-                    <span className="truncate">{ctl.replyTo.content}</span>
+                    <span className="truncate"><CensoredText text={ctl.replyTo.content || ''} preview /></span>
                     <Button variant="ghost" size="icon-sm" className="ml-auto" aria-label="Cancel reply" onClick={() => ctl.setReplyTo(null)}><X /></Button>
                   </div>
                 )}
@@ -248,7 +249,7 @@ export function MessagesPage(props: any) {
         <DialogContent className="gap-3 p-0 sm:max-w-sm">
           <DialogHeader className="px-5 pt-5">
             <DialogTitle>Forward message</DialogTitle>
-            <DialogDescription className="line-clamp-2">{ctl.forwardMsg?.content || ctl.forwardMsg?.file_name}</DialogDescription>
+            <DialogDescription className="line-clamp-2">{ctl.forwardMsg?.content ? <CensoredText text={ctl.forwardMsg.content} preview /> : ctl.forwardMsg?.file_name}</DialogDescription>
           </DialogHeader>
           <Command className="border-t border-border">
             <CommandInput placeholder="Find a channel…" />

@@ -10,6 +10,7 @@ import { apiFetch } from '../../../services/api';
 import { notify } from '../../../components/dialog';
 import { describeActivity } from '../../../utils/taskActivityText';
 import { MemberAvatar } from './AssigneePicker';
+import { CensoredText } from '../../../components/CensoredText';
 
 export interface Timeline {
   /** Sketches on the task (TaskSketches.tsx), oldest first. */
@@ -130,7 +131,7 @@ export function TaskTimeline({ taskId, timeline, reload, members, currentUserId,
                     </div>
                   </div>
                 ) : (
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm">{e.c.body}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-sm"><CensoredText text={e.c.body} /></p>
                 )}
               </div>
             </li>

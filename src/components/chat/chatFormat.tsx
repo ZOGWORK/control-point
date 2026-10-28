@@ -1,7 +1,8 @@
 // Pure chat formatting helpers (same rules as Legacy ChatView): @[Name]
 // mention pills, linkified URLs with trailing punctuation stripped, the first
 // URL for link previews, day-divider labels, file sizes.
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
+import { censorText } from '../CensoredText';
 
 const URL_RE = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
 
@@ -34,17 +35,18 @@ export function extractFirstUrl(text: string): string | null {
   return url.startsWith('http') ? url : `https://${url}`;
 }
 
-/** Render message text with mention pills and links. */
-export function renderMessageText(text: string, cls: { mention: string; link: string }): ReactNode[] {
+/** Render message text with mention pills and links. Swear words are
+ *  blurred (`adult`: the reader said they're 18 or older, so may tap to show). */
+export function renderMessageText(text: string, cls: { mention: string; link: string }, adult = false): ReactNode[] {
   return text.split(/(@\[[^\]]+\])/).map((part, i) => {
     if (part.startsWith('@[') && part.endsWith(']')) {
       return <span key={i} className={cls.mention}>@{part.slice(2, -1)}</span>;
     }
     const urlParts = part.split(URL_RE);
-    if (urlParts.length === 1) return part;
+    if (urlParts.length === 1) return <Fragment key={i}>{censorText(part, adult, `${i}`)}</Fragment>;
     return urlParts.map((up, j) => {
       URL_RE.lastIndex = 0;
-      if (!URL_RE.test(up)) return up;
+      if (!URL_RE.test(up)) return <Fragment key={`${i}-${j}`}>{censorText(up, adult, `${i}-${j}`)}</Fragment>;
       URL_RE.lastIndex = 0;
       const m = up.match(/^(.*?)([.,;:!?)]+)$/);
       const clean = m ? m[1] : up;

@@ -134,6 +134,8 @@ export function useSignupForm({ mode, onSignup, onDone, inviteToken }: {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPw, setShowPw] = useState(false);
+  // "I'm 18 or older" (honesty system): lets them tap open hidden swear words.
+  const [adult, setAdult] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The FTC number already has a workspace: offer to ask to join it.
@@ -145,7 +147,7 @@ export function useSignupForm({ mode, onSignup, onDone, inviteToken }: {
     if (password !== confirm) { setError("Passwords don't match."); return; }
     setBusy(true);
     try {
-      onDone(await onSignup({ accountType: 'student', name, email, password, requestFtcNumber: takenNumber }));
+      onDone(await onSignup({ accountType: 'student', name, email, password, adult, requestFtcNumber: takenNumber }));
     } catch (err: any) {
       setError(err.message || 'Could not send the request');
     } finally {
@@ -163,7 +165,7 @@ export function useSignupForm({ mode, onSignup, onDone, inviteToken }: {
     try {
       const viaInvite = mode === 'student' && !!inviteToken;
       const data = await onSignup({
-        accountType: mode, name, email, password,
+        accountType: mode, name, email, password, adult,
         teamName, teamNumber,
         ...(viaInvite ? { inviteToken } : { accessCode }),
       });
@@ -177,7 +179,7 @@ export function useSignupForm({ mode, onSignup, onDone, inviteToken }: {
   };
 
   return {
-    name, setName, email, setEmail, password, setPassword, confirm, setConfirm, showPw, setShowPw,
+    name, setName, email, setEmail, password, setPassword, confirm, setConfirm, showPw, setShowPw, adult, setAdult,
     teamName, setTeamName, teamNumber, setTeamNumber, accessCode, setAccessCode,
     error, busy, submit, takenNumber, askToJoin,
   };
@@ -203,6 +205,7 @@ export function useOAuthSignup({ token, intent, provider, onDone, inviteToken }:
   const [teamName, setTeamName] = useDraft(k('team-name'), '');
   const [teamNumber, setTeamNumber] = useDraft(k('team-number'), '');
   const [accessCode, setAccessCode] = useDraft(k('access-code'), '');
+  const [adult, setAdult] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [takenNumber, setTakenNumber] = useState<number | null>(null);
@@ -215,7 +218,7 @@ export function useOAuthSignup({ token, intent, provider, onDone, inviteToken }:
       const res = await apiFetch('/api/auth/oauth/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, token, ...body }),
+        body: JSON.stringify({ provider, token, adult, ...body }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -243,7 +246,7 @@ export function useOAuthSignup({ token, intent, provider, onDone, inviteToken }:
   return {
     takenNumber, askToJoin,
     needsRole, pickedRole, setPickedRole, isAdmin, viaInvite,
-    teamName, setTeamName, teamNumber, setTeamNumber, accessCode, setAccessCode,
+    teamName, setTeamName, teamNumber, setTeamNumber, accessCode, setAccessCode, adult, setAdult,
     error, busy, submit,
   };
 }

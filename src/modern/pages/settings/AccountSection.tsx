@@ -7,7 +7,7 @@ import { PasswordChecklist } from '../../ui/PasswordChecklist';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Compass, Cookie, Download, KeyRound, Loader2, LogOut, MonitorSmartphone, TriangleAlert } from 'lucide-react';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Label } from '../../../components/ui-kit';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Label, Switch } from '../../../components/ui-kit';
 import { apiFetch } from '../../../services/api';
 import { confirmDialog, notify } from '../../../components/dialog';
 import { SettingsGroup, SettingsRow } from './SettingsPage';
@@ -49,7 +49,7 @@ function PasswordForm() {
   );
 }
 
-export function AccountSection({ currentUser, teams = [], onLogout, onSetupGuide }: any) {
+export function AccountSection({ currentUser, teams = [], onLogout, onSetupGuide, onUserSaved }: any) {
   const user = currentUser || {};
   const navigate = useNavigate();
   const [exporting, setExporting] = useState(false);
@@ -75,6 +75,22 @@ export function AccountSection({ currentUser, teams = [], onLogout, onSetupGuide
       notify('Could not export your data.', 'error');
     } finally {
       setExporting(false);
+    }
+  };
+
+  // "I'm 18 or older" (an honesty system): lets them tap open blurred swear words.
+  const [savingAdult, setSavingAdult] = useState(false);
+  const saveAdult = async (adult: boolean) => {
+    setSavingAdult(true);
+    try {
+      const res = await apiFetch('/api/auth/adult', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adult }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { notify(data.error || 'Could not save that.', 'error'); return; }
+      onUserSaved?.({ adult: data.adult === true });
+    } catch {
+      notify('Could not save that.', 'error');
+    } finally {
+      setSavingAdult(false);
     }
   };
 
@@ -139,6 +155,12 @@ export function AccountSection({ currentUser, teams = [], onLogout, onSetupGuide
           </SettingsRow>
         </SettingsGroup>
       )}
+
+      <SettingsGroup title="Content">
+        <SettingsRow label="I'm 18 or older" htmlFor="settings-adult" description="On your honor. Swear words in messages and comments are always blurred; turn this on to tap one and read it.">
+          <Switch id="settings-adult" checked={!!user.adult} disabled={savingAdult} onCheckedChange={(v) => void saveAdult(v)} />
+        </SettingsRow>
+      </SettingsGroup>
 
       <SettingsGroup title="Your data">
         <SettingsRow label="Download my data" description="A JSON file of your profile and everything you’ve created.">
