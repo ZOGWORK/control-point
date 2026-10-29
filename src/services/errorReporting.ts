@@ -21,6 +21,16 @@ export function isChunkLoadError(err: unknown): boolean {
   return /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Loading chunk [\w-]+ failed|ChunkLoadError|Unable to preload CSS/i.test(msg);
 }
 
+/**
+ * A fetch that never reached the server (offline, a dropped connection, the
+ * server restarting during a deploy). Each browser words it differently. The
+ * request's own caller decides what the person sees; it is not a code fault.
+ */
+export function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  return /^(Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed|Network request failed)$/i.test(err.message);
+}
+
 const RELOAD_KEY = 'cp-chunk-reload-at';
 /** Reload the page to pick up a new deploy, at most once a minute (no loops). Returns true if reloading. */
 export function reloadForNewBuild(): boolean {
@@ -73,6 +83,7 @@ export function installGlobalErrorReporting(): void {
   window.addEventListener('unhandledrejection', (e) => {
     const reason: any = e.reason;
     if (isChunkLoadError(reason) && reloadForNewBuild()) return;
+    if (isNetworkError(reason)) return;
     reportClientError({ kind: 'unhandledrejection', message: String(reason?.message || reason || 'Unhandled rejection'), stack: reason?.stack });
   });
 }

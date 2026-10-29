@@ -6,7 +6,7 @@ vi.mock('../../services/errorReporting', async (orig) => ({ ...(await orig<objec
 
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { ErrorBoundary, RouteErrorBoundary } from '../ErrorBoundary';
-import { isChunkLoadError } from '../../services/errorReporting';
+import { isChunkLoadError, isNetworkError } from '../../services/errorReporting';
 
 let shouldThrow: Error | null = null;
 function Boom() {
@@ -79,5 +79,17 @@ describe('isChunkLoadError', () => {
     expect(isChunkLoadError(new Error('Importing a module script failed.'))).toBe(true);
     expect(isChunkLoadError(new Error('error loading dynamically imported module'))).toBe(true);
     expect(isChunkLoadError(new Error('Cannot read properties of undefined'))).toBe(false);
+  });
+});
+
+describe('isNetworkError', () => {
+  it('recognises a fetch that never reached the server, in each browser’s words', () => {
+    expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isNetworkError(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(true);
+    expect(isNetworkError(new TypeError('Load failed'))).toBe(true);
+    // A chunk load failure is handled separately (reload for the new build).
+    expect(isNetworkError(new TypeError('Failed to fetch dynamically imported module: x'))).toBe(false);
+    expect(isNetworkError(new TypeError("Cannot read properties of undefined (reading 'json')"))).toBe(false);
+    expect(isNetworkError(new Error('Failed to fetch'))).toBe(false);
   });
 });
