@@ -128,6 +128,9 @@ const intOrNull = (v: unknown, max: number): number | null | undefined => {
 const ids = (raw: unknown): number[] => (Array.isArray(raw) ? [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : []);
 /** Download tickets for chosen files: who asked, in which workspace, which files; five minutes. In memory (one server). */
 const zipTickets = new Map<string, { teamId: number; memberId: number; ids: number[]; name: string; exp: number }>();
+const ZIP_TICKETS_PER_MEMBER = 3;
+/** File ids held by every live ticket together (a few MB at most). */
+const ZIP_TICKET_IDS_MAX = 500_000;
 const qs = (n: number) => Array(n).fill("?").join(",");
 /** A Content-Disposition that keeps a UTF-8 name ("2025–26 DECODE.zip"). */
 function disposition(kind: "attachment" | "inline", name: string) {
@@ -776,10 +779,18 @@ export function createPrints(deps: PrintDeps) {
         const list = ids(req.body?.ids);
         if (!list.length) return res.status(400).json({ error: "Pick some files" });
         if (list.length > ZIP_MAX_ENTRIES) return res.status(413).json({ error: `One download holds at most ${ZIP_MAX_ENTRIES.toLocaleString("en-US")} files. Pick fewer.` });
+        // Only this workspace's files that exist are kept, so a ticket is never bigger than the library.
+        const mine = (await dbAll("SELECT id FROM print_files WHERE team_id = ? AND id IN (SELECT value FROM json_each(?))", a.teamId, JSON.stringify(list))).map((r) => Number(r.id));
+        if (!mine.length) return res.status(404).json({ error: "Those files no longer exist" });
         for (const [k, v] of zipTickets) if (v.exp < Date.now()) zipTickets.delete(k);
-        if (zipTickets.size > 5000) return res.status(429).json({ error: "Too many downloads are being prepared. Try again in a minute." });
+        // Each person keeps at most a few tickets (the oldest goes), and all of them together stay small.
+        const own = [...zipTickets].filter(([, v]) => v.memberId === a.auth.memberId).sort((x, y) => x[1].exp - y[1].exp);
+        for (const [k] of own.slice(0, Math.max(0, own.length - (ZIP_TICKETS_PER_MEMBER - 1)))) zipTickets.delete(k);
+        let held = 0;
+        for (const v of zipTickets.values()) held += v.ids.length;
+        if (held + mine.length > ZIP_TICKET_IDS_MAX) return res.status(429).json({ error: "Too many downloads are being prepared. Try again in a minute." });
         const ticket = randomBytes(18).toString("base64url");
-        zipTickets.set(ticket, { teamId: a.teamId, memberId: a.auth.memberId, ids: list, name: typeof req.body?.name === "string" ? req.body.name.slice(0, 120) : "", exp: Date.now() + 5 * 60_000 });
+        zipTickets.set(ticket, { teamId: a.teamId, memberId: a.auth.memberId, ids: mine, name: typeof req.body?.name === "string" ? req.body.name.slice(0, 120) : "", exp: Date.now() + 5 * 60_000 });
         res.json({ url: `/api/prints/zip?ticket=${ticket}` });
       } catch (e) { sendError(res, e, "zip ticket"); }
     });
@@ -807,6 +818,8 @@ export function createPrints(deps: PrintDeps) {
           if (typeof req.query.ticket === "string") {
             const tk = zipTickets.get(req.query.ticket);
             if (!tk || tk.exp < Date.now() || tk.teamId !== a.teamId || tk.memberId !== a.auth.memberId) return res.status(404).json({ error: "This download link has expired. Start the download again." });
+            // One use.
+            zipTickets.delete(req.query.ticket);
             list = tk.ids;
             name = tk.name;
           } else {

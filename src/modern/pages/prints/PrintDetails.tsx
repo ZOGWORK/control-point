@@ -85,6 +85,13 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
   }, [file.id, file.updatedAt]);
 
   const save = async (patch: Record<string, unknown>) => {
+    // A count still waiting goes with this save, or is dropped when this marks the file printed (which fills the count).
+    if (copiesTimer.current) {
+      clearTimeout(copiesTimer.current);
+      copiesTimer.current = null;
+      if (pendingCopies.current !== null && patch.status !== 'printed' && patch.copiesPrinted === undefined) patch = { ...patch, copiesPrinted: pendingCopies.current };
+      pendingCopies.current = null;
+    }
     try { await prints.updateFile(file.id, patch); } catch (e: any) { onError(e?.message || "Couldn't save that."); }
   };
   const where = folderTrail(lib.folders, file.folderId).map((f) => f.name);

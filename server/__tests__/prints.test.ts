@@ -428,9 +428,12 @@ describe("groups, details and downloads", () => {
     // A group of any size goes through a ticket, valid only for the person who asked.
     const tk = await t.post("/api/prints/zip", { ids: [a.body.id, b.body.id], name: "Intake + PETG" }, student);
     expect(tk.body.url).toMatch(/^\/api\/prints\/zip\?ticket=/);
+    expect((await raw(tk.body.url, admin)).status).toBe(404);
     const viaTicket = await raw(tk.body.url, student);
     expect(Object.keys(unzip(viaTicket.bytes)).sort()).toEqual(["2025–26 DECODE/Intake/b.gcode", "2025–26 DECODE/a.stl"]);
-    expect((await raw(tk.body.url, admin)).status).toBe(404);
+    // One use; ids of files that don't exist (or are another workspace's) never make a ticket.
+    expect((await raw(tk.body.url, student)).status).toBe(404);
+    expect((await t.post("/api/prints/zip", { ids: [999_999, 999_998] }, student)).status).toBe(404);
     expect((await t.post("/api/prints/zip", { ids: Array.from({ length: 65_536 }, (_, i) => i + 1) }, student)).status).toBe(413);
     const emptyFolder = await t.post("/api/prints/folders", { name: "Nothing" }, admin);
     expect((await raw(`/api/prints/zip?folder=${emptyFolder.body.id}`, admin)).status).toBe(404);

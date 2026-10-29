@@ -204,6 +204,18 @@ describe('Prints explorer', () => {
     await waitFor(() => expect(calls().filter((c) => c.url === '/api/prints/files/1')).toEqual([{ url: '/api/prints/files/1', method: 'PATCH', body: { copiesPrinted: 3 } }]));
   });
 
+  it('drops a waiting count when the file is marked printed', async () => {
+    setup('/prints?folder=2');
+    await screen.findByRole('heading', { name: /Intake ·/ });
+    fireEvent.click(item('Roller hub.stl'));
+    const sheet = await screen.findByRole('dialog', { name: 'Roller hub.stl' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'One more printed' }));
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'Printed' }));
+    await waitFor(() => expect(calls().some((c) => c.url === '/api/prints/files/1')).toBe(true));
+    await new Promise((r) => setTimeout(r, 700));
+    expect(calls().filter((c) => c.url === '/api/prints/files/1')).toEqual([{ url: '/api/prints/files/1', method: 'PATCH', body: { status: 'printed' } }]);
+  });
+
   it('is read-only for members without manage_prints', async () => {
     lib = { ...seed(), canEdit: false };
     api.apiFetch.mockImplementation((url: string) => (url === '/api/prints/library' ? res(lib) : res([])));
