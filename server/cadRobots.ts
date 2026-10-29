@@ -129,7 +129,8 @@ export function createCadRobots(deps: CadRobotDeps) {
     const rows = await dbAll(
       `SELECT id, name, section, quantity, source, unit_cost, status, assignee, notes, created_at, updated_at, robot_id,
               ck_document_id, ck_element_id, ck_part_key, ck_import_id, ck_extra, ck_removed_at,
-              choice_type, choice_type_set, choice_type_by, choice_type_at, choice_product, choice_product_by, choice_product_at
+              choice_type, choice_type_set, choice_type_by, choice_type_at, choice_product, choice_product_by, choice_product_at,
+              ck_picture_url, ck_picture_at
          FROM cad_parts WHERE team_id = ? AND (robot_id = ?${unassigned}) ORDER BY name COLLATE NOCASE, id`, teamId, robotId);
     return rows.map(partView);
   }
@@ -279,7 +280,19 @@ export function createCadRobots(deps: CadRobotDeps) {
           return { id: Number(i.id), sentAt: i.created_at, sentBy: i.sent_by, assemblyName: i.assembly_name, assemblyUrl: i.assembly_url, revision: i.revision,
             partCount: Number(i.part_count) || 0, files, created: Number(result.created) || 0, updated: Number(result.updated) || 0, markedRemoved: Number(result.markedRemoved) || 0 };
         });
+        // The newest stored STEP zip and workbook across every send of this robot, not just the ten listed.
+        const withFiles = await dbAll("SELECT id, created_at, files FROM cad_imports WHERE team_id = ? AND robot_id = ? AND files LIKE '%\"stored\":true%' ORDER BY id DESC LIMIT 200", teamId, robot.id);
+        const newest = (pattern: RegExp) => {
+          for (const i of withFiles) {
+            let files: any[] = [];
+            try { files = JSON.parse(i.files || "[]") || []; } catch { /* none */ }
+            const file = files.find((f) => f?.stored && typeof f.url === "string" && pattern.test(String(f.name)));
+            if (file) return { importId: Number(i.id), sentAt: i.created_at, file: { name: String(file.name), url: String(file.url), sizeBytes: Number(file.sizeBytes) || null } };
+          }
+          return null;
+        };
         res.json({
+          downloads: { step: newest(/\.zip$/i), workbook: newest(/\.xlsx$/i) },
           robot: { id: Number(robot.id), name: robot.name, season: Number(robot.season), seasonName: seasonName(Number(robot.season)), isMain: !!robot.is_main,
             assemblyUrl: robot.assembly_url, documentId: robot.document_id, elementId: robot.element_id, notes: robot.notes },
           canManage: await canManage(auth), parts, summary: bomSummary(parts), imports,

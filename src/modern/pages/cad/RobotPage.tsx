@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, Check, ClipboardCheck, Trash2, ExternalLink, FileBox, FileCheck2, FileX2, History, Layers, MoreHorizontal, Package, Pencil, Plus, Search,
+  ArrowLeft, Check, ClipboardCheck, Download, Trash2, ExternalLink, FileBox, FileCheck2, FileX2, History, Layers, MoreHorizontal, Package, Pencil, Plus, Search,
   Send, Sparkles, Star,
 } from 'lucide-react';
 import {
@@ -43,11 +43,51 @@ const TABS = [
 
 /** The assembly picture Control Kit sent with the latest import that had one. */
 function assemblyPicture(imports: RobotImport[]) {
-  for (const i of imports) {
-    const f = i.files.find((x) => x.stored && x.url && /\.(png|jpe?g|webp)$/i.test(x.name));
-    if (f) return f.url!;
+  return latestFile(imports, /\.(png|jpe?g|webp)$/i)?.file.url ?? null;
+}
+
+type ImportFile = RobotImport['files'][number];
+/** The newest stored file of a kind across this robot's sends (a later send without its STEP zip keeps the earlier zip downloadable). */
+export function latestFile(imports: RobotImport[], pattern: RegExp): { file: ImportFile; sent: RobotImport } | null {
+  for (const sent of imports) {
+    const file = sent.files.find((f) => f.stored && f.url && pattern.test(f.name));
+    if (file) return { file, sent };
   }
   return null;
+}
+const STEP_ZIP = /\.zip$/i;
+const WORKBOOK = /\.xlsx$/i;
+
+/** The newest stored zip or workbook: the server's answer across every send, else the listed sends (an older server). */
+function newestDownload(data: RobotDetail, kind: 'step' | 'workbook') {
+  const found = data.downloads?.[kind];
+  if (found) return { file: { ...found.file, stored: true, sizeBytes: found.file.sizeBytes ?? undefined } as ImportFile, sent: { id: found.importId, sentAt: found.sentAt } };
+  return latestFile(data.imports, kind === 'step' ? STEP_ZIP : WORKBOOK);
+}
+
+/** Download the robot's STEP files and workbook straight from Control Point. */
+function Downloads({ data, compact = false }: { data: RobotDetail; compact?: boolean }) {
+  const imports = data.imports;
+  const step = newestDownload(data, 'step');
+  const book = newestDownload(data, 'workbook');
+  if (!step && !book) return compact ? null : <p className="text-sm text-muted-foreground">No STEP files or workbook yet. In Control Kit, send this assembly, then press Add STEP files.</p>;
+  const older = !!step && !!imports[0] && step.sent.id !== imports[0].id;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {step && <Button asChild size="sm"><a href={step.file.url} download={step.file.name}><Download /> STEP files for every part to make{step.file.sizeBytes ? <span className="font-normal opacity-80"> · {fmtSize(step.file.sizeBytes)}</span> : null}</a></Button>}
+      {book && <Button asChild size="sm" variant="outline"><a href={book.file.url} download={book.file.name}><Download /> Workbook</a></Button>}
+      {!compact && older && <span className="text-xs text-muted-foreground">STEP files from the send of {fmtDate(step!.sent.sentAt)}; the latest send had none.</span>}
+      {!compact && !step && <span className="text-xs text-muted-foreground">No STEP files yet. In Control Kit, press Add STEP files.</span>}
+    </div>
+  );
+}
+
+/** A part's Onshape picture, drawn by Control Kit, on the same dark stage Control Kit uses (its pictures are transparent). */
+export function PartPicture({ url, name, className }: { url: string | null | undefined; name: string; className?: string }) {
+  // Which URL failed: a replacement picture (new URL) gets its own chance to load.
+  const [broken, setBroken] = useState<string | null>(null);
+  if (!url || broken === url) return null;
+  return <img src={url} alt={`${name} in Onshape`} loading="lazy" onError={() => setBroken(url)} className={cn('rounded-lg bg-[#26262b] object-contain', className)} />;
 }
 
 export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; currentUser?: any; isAdmin: boolean }) {
@@ -88,7 +128,8 @@ export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; 
                   : <span>No assembly linked</span>}
                 {d.imports[0] && <span>Last sent {fmtDate(d.imports[0].sentAt)}{d.imports[0].sentBy ? ` by ${d.imports[0].sentBy}` : ''}</span>}
               </p>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4"><Downloads data={d} compact /></div>
+              <div className="mt-2 flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm"><a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer"><img src={CONTROL_KIT_ICON} alt="" aria-hidden className="size-4 rounded-[3px]" /> Rescan in Control Kit<span className="sr-only"> (opens in a new tab)</span></a></Button>
                 {d.canManage && (
                   <DropdownMenu>
@@ -115,7 +156,7 @@ export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; 
           </TabsList>
         </Tabs>
         {tab === 'bom' && <RobotBom ctl={ctl} data={d} />}
-        {tab === 'files' && <RobotFiles imports={d.imports} />}
+        {tab === 'files' && <RobotFiles data={d} />}
         {tab === 'reviews' && <CadReviewsTab currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === 'snapshots' && <CadSnapshotsTab currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === 'sends' && <RobotSends imports={d.imports} />}
@@ -202,7 +243,7 @@ function RobotBom({ ctl, data }: { ctl: ReturnType<typeof useRobot>; data: Robot
         BOM_GROUPS.map((g) => {
           const items = shown.filter((p) => p.effective.group === g);
           if (!items.length) return null;
-          return <BomGroupTable key={g} group={g} items={items} onOpen={setOpen} highlight={importId} saving={ctl.saving} />;
+          return <BomGroupTable key={g} group={g} items={items} onOpen={setOpen} highlight={importId} saving={ctl.saving} stepZip={g === 'make' ? newestDownload(data, 'step')?.file : null} />;
         })
       )}
       {removed.length > 0 && (
@@ -219,7 +260,7 @@ function RobotBom({ ctl, data }: { ctl: ReturnType<typeof useRobot>; data: Robot
   );
 }
 
-function BomGroupTable({ group, items, onOpen, highlight, saving }: { group: BomGroup; items: BomPart[]; onOpen: (id: number) => void; highlight: number | null; saving: Set<number> }) {
+function BomGroupTable({ group, items, onOpen, highlight, saving, stepZip }: { group: BomGroup; items: BomPart[]; onOpen: (id: number) => void; highlight: number | null; saving: Set<number>; stepZip?: ImportFile | null }) {
   const subtotal = items.reduce((a, p) => a + (p.effective.totalUsd ?? 0), 0);
   const priced = items.filter((p) => p.effective.totalUsd !== null).length;
   return (
@@ -229,6 +270,7 @@ function BomGroupTable({ group, items, onOpen, highlight, saving }: { group: Bom
           <span className={cn('size-2.5 rounded-full', GROUP_BAR[group])} aria-hidden />{BOM_GROUP_LABELS[group]} <span className="font-normal tabular-nums text-muted-foreground">{items.length}</span>
         </h2>
         {(group === 'buy' || group === 'hardware') && <span className="text-sm tabular-nums text-muted-foreground">{priced ? `${money(subtotal)} · ${priced} of ${items.length} priced` : 'No prices yet'}</span>}
+        {group === 'make' && stepZip?.url && <a href={stepZip.url} download={stepZip.name} className="inline-flex items-center gap-1 text-sm underline-offset-4 hover:underline"><Download className="size-4" /> STEP files</a>}
       </div>
       <div className={cn('overflow-x-auto rounded-xl border border-border border-t-2', group === 'review' ? 'border-t-orange-400' : group === 'buy' ? 'border-t-sky-400' : group === 'make' ? 'border-t-[#ffc700]' : '')}>
         <Table>
@@ -245,9 +287,14 @@ function BomGroupTable({ group, items, onOpen, highlight, saving }: { group: Bom
               return (
                 <TableRow key={p.id} data-record-id={p.id} onClick={() => onOpen(p.id)} className={cn('cursor-pointer', highlight && p.ck_import_id === highlight && 'bg-accent/5', saving.has(p.id) && 'opacity-60')}>
                   <TableCell className="min-w-[12rem]">
-                    <button type="button" onClick={(ev) => { ev.stopPropagation(); onOpen(p.id); }} className="text-left font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">{p.name}</button>
-                    <span className="block text-xs text-muted-foreground">
-                      {[extra?.partNumber, extra?.reviewReason && group === 'review' ? extra.reviewReason : null, !extra ? 'Added by hand' : null].filter(Boolean).join(' · ')}
+                    <span className="flex items-center gap-3">
+                      {p.ck_picture_url ? <PartPicture url={p.ck_picture_url} name={p.name} className="size-11 shrink-0" /> : extra ? <span className="size-11 shrink-0 rounded-lg bg-secondary" aria-hidden /> : null}
+                      <span className="min-w-0">
+                        <button type="button" onClick={(ev) => { ev.stopPropagation(); onOpen(p.id); }} className="text-left font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">{p.name}</button>
+                        <span className="block text-xs text-muted-foreground">
+                          {[extra?.partNumber, extra?.reviewReason && group === 'review' ? extra.reviewReason : null, !extra ? 'Added by hand' : null].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
                     </span>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{p.quantity}</TableCell>
@@ -301,6 +348,7 @@ function PartDrawer({ part, canManage, busy, onClose, onChoose, onEdit, onDelete
     <Sheet open onOpenChange={(o) => { if (!o) onClose(); }}>
       <SheetContent side={narrow ? 'bottom' : 'right'} className={cn('gap-0 overflow-y-auto p-0', !narrow && 'sm:max-w-xl')}>
         <SheetHeader className="border-b border-border px-6 py-5 pr-12">
+          {part.ck_picture_url && <PartPicture url={part.ck_picture_url} name={part.name} className="mb-3 aspect-[3/2] w-full" />}
           <SheetTitle>{part.name}</SheetTitle>
           <SheetDescription>{[x?.partNumber, x?.material, `${part.quantity} in the robot`].filter(Boolean).join(' · ')}</SheetDescription>
           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -308,6 +356,7 @@ function PartDrawer({ part, canManage, busy, onClose, onChoose, onEdit, onDelete
             <span className="text-xs text-muted-foreground">{BY_TEXT[e.typeBy]}{e.typeBy === 'control-point' && part.choice_type_by ? ` by ${part.choice_type_by}` : ''}</span>
             {e.totalUsd !== null && <span className="text-sm font-medium tabular-nums text-emerald-600 dark:text-emerald-400">{money(e.totalUsd)}</span>}
           </div>
+          {part.ck_picture_url && part.ck_picture_at && <p className="text-xs text-muted-foreground">Picture drawn by Onshape, from Control Kit {fmtDate(part.ck_picture_at)}</p>}
           {(e.typePending || e.productPending) && <p className="mt-2 rounded-lg bg-secondary px-3 py-2 text-xs text-muted-foreground">Chosen in Control Point. It reaches Control Kit at its next scan of this assembly; a re-send keeps it.</p>}
         </SheetHeader>
         <div className="grid gap-6 px-6 py-5">
@@ -412,13 +461,18 @@ function CandidateRow({ c, qty, chosen, settled, canManage, busy, onUse }: { c: 
 // Files and sends
 // ---------------------------------------------------------------------------
 
-function RobotFiles({ imports }: { imports: RobotImport[] }) {
-  const latest = imports.find((i) => i.files.length);
+function RobotFiles({ data }: { data: RobotDetail }) {
+  const latest = data.imports.find((i) => i.files.length);
   return (
     <>
       <section className="mb-8">
-        <h2 className="mb-1 text-base font-semibold">From Control Kit</h2>
-        <p className="mb-3 text-sm text-muted-foreground">The workbook, STEP files and assembly picture from the latest send.</p>
+        <h2 className="mb-1 text-base font-semibold">Downloads</h2>
+        <p className="mb-3 text-sm text-muted-foreground">STEP files for every part to make (one ZIP with a manifest) and the BOM workbook, from the newest send that has them.</p>
+        <Downloads data={data} />
+      </section>
+      <section className="mb-8">
+        <h2 className="mb-1 text-base font-semibold">From the latest send</h2>
+        <p className="mb-3 text-sm text-muted-foreground">The workbook, STEP files and assembly picture Control Kit sent{latest ? ` on ${fmtDate(latest.sentAt)}` : ''}.</p>
         {latest ? <FileList files={latest.files} /> : <p className="text-sm text-muted-foreground">No files sent yet. Control Kit attaches the workbook and STEP zip when you send.</p>}
       </section>
       <CadDocsTab />
@@ -433,8 +487,8 @@ function FileList({ files }: { files: RobotImport['files'] }) {
         <li key={i} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 text-sm">
           {f.stored && f.url ? <FileCheck2 className="size-5 shrink-0 text-emerald-600 dark:text-emerald-400" /> : <FileX2 className="size-5 shrink-0 text-muted-foreground" />}
           <span className="min-w-0 flex-1">
-            {f.stored && f.url ? <a href={f.url} className="block truncate font-medium hover:underline">{f.name}</a> : <span className="block truncate">{f.name}</span>}
-            <span className="block text-xs text-muted-foreground">{f.stored ? (f.sizeBytes ? fmtSize(f.sizeBytes) : 'Stored') : f.note || 'Not included'}</span>
+            {f.stored && f.url ? <a href={f.url} download={f.name} className="block truncate font-medium hover:underline">{f.name}</a> : <span className="block truncate">{f.name}</span>}
+            <span className="block text-xs text-muted-foreground">{f.stored ? (f.sizeBytes ? fmtSize(f.sizeBytes) : 'Stored') : f.note === 'Available in Control Kit' ? 'Not uploaded yet. In Control Kit, press Add STEP files.' : f.note || 'Not included'}</span>
           </span>
         </li>
       ))}
