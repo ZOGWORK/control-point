@@ -147,6 +147,14 @@ describe("helpers", () => {
     expect((await runReview(env, ask, broken("drop"))).provider).toBe("anthropic");
     expect((await runReview(env, ask, broken("html"))).provider).toBe("anthropic");
     expect(calls).toEqual(["gemini", "anthropic", "gemini", "anthropic"]);
+    // A refusal whose body then breaks off is still a refusal: no switch to Anthropic.
+    calls.length = 0;
+    const refusedThenDropped = (async (url: string) => {
+      calls.push(String(url).includes("generateContent") ? "gemini" : "anthropic");
+      return new Response(new ReadableStream({ start(c) { c.error(new TypeError("terminated")); } }), { status: 403 });
+    }) as unknown as typeof fetch;
+    await expect(runReview(env, ask, refusedThenDropped)).rejects.toMatchObject({ status: 502, failover: false });
+    expect(calls).toEqual(["gemini"]);
   });
 });
 

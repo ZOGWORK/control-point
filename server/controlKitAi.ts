@@ -66,15 +66,16 @@ export function checkReviewAsk(body: unknown): { ok: true; ask: ReviewAsk } | { 
  */
 async function call(fetcher: typeof fetch, url: string, init: RequestInit, ms: number, label: string): Promise<{ res: Response; body: any }> {
   let res: Response;
-  let text: string;
+  let text = "";
   try {
     res = await fetcher(url, { ...init, signal: AbortSignal.timeout(ms) });
+    // A refusal's status decides (and an auth or request error never fails over), so only a success's body is read here.
+    if (!res.ok) { await res.body?.cancel().catch(() => undefined); return { res, body: null }; }
     text = await res.text();
   } catch (e: any) {
     if (e?.name === "TimeoutError" || e?.name === "AbortError") throw new ReviewError(504, "ai_timeout", `${label} did not answer within ${ms / 1000} seconds.`, true);
     throw new ReviewError(502, "ai_failed", `Could not reach ${label}.`, true);
   }
-  if (!res.ok) return { res, body: null };
   const body = parsed(text);
   if (!body || typeof body !== "object") throw new ReviewError(502, "ai_failed", `${label} sent an unreadable response.`, true);
   return { res, body };
