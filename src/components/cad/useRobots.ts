@@ -26,7 +26,10 @@ export type RobotImport = {
   id: number; sentAt: string; sentBy: string | null; assemblyName: string | null; assemblyUrl: string | null; revision: string | null; partCount: number;
   files: { name: string; stored: boolean; url?: string; note?: string; sizeBytes?: number | null; uploadedAt?: string }[]; created: number; updated: number; markedRemoved: number;
 };
+/** The newest stored file of a kind across every send of a robot. */
+export type RobotDownload = { importId: number; sentAt: string; file: { name: string; url: string; sizeBytes: number | null } } | null;
 export type RobotDetail = {
+  downloads?: { step: RobotDownload; workbook: RobotDownload };
   robot: { id: number; name: string; season: number; seasonName: string; isMain: boolean; assemblyUrl: string | null; documentId: string | null; elementId: string | null; notes: string };
   canManage: boolean; parts: BomPart[]; summary: BomSummary; imports: RobotImport[];
 };

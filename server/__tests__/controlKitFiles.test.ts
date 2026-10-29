@@ -105,6 +105,10 @@ describe("helpers", () => {
     expect(withUploadedFile([{ name: "Drive STEP.zip", stored: false }], up)).toEqual([up]);
     expect(withUploadedFile([{ name: "a.xlsx", stored: true }, { name: "STEP files", stored: false, note: "Not exported" }], up)).toEqual([{ name: "a.xlsx", stored: true }, up]);
     expect(withUploadedFile([{ name: "a.xlsx", stored: true }], up)).toEqual([{ name: "a.xlsx", stored: true }, up]);
+    // A full list refuses a new name instead of dropping an entry; replacing one still works.
+    const full = Array.from({ length: 40 }, (_, i) => ({ name: `f${i}.xlsx`, stored: true }));
+    expect(withUploadedFile(full, up)).toBeNull();
+    expect(withUploadedFile(full, { name: "f3.xlsx", stored: true, url: "/api/files/1" })).toHaveLength(40);
   });
   it("accepts only a review of the documented shape", () => {
     expect(checkReviewAsk(review()).ok).toBe(true);
@@ -128,6 +132,21 @@ describe("helpers", () => {
     await expect(runReview(env, ask, fake(403))).rejects.toBeInstanceOf(ReviewError);
     expect(calls).toEqual(["gemini"]);
     await expect(runReview({}, ask, fake(200))).rejects.toMatchObject({ status: 501 });
+  });
+  it("treats a body that breaks off, or is not the provider's JSON, as a failure worth failing over for", async () => {
+    const env = { GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" };
+    const ask = (checkReviewAsk(review()) as any).ask;
+    const calls: string[] = [];
+    const broken = (kind: "drop" | "html") => (async (url: string) => {
+      const gemini = String(url).includes("generateContent");
+      calls.push(gemini ? "gemini" : "anthropic");
+      if (!gemini) return Response.json({ stop_reason: "end_turn", content: [{ type: "text", text: '{"items":[]}' }], usage: {} });
+      if (kind === "html") return new Response("<html>proxy</html>", { status: 200 });
+      return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"candi')); c.error(new TypeError("terminated")); } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    expect((await runReview(env, ask, broken("drop"))).provider).toBe("anthropic");
+    expect((await runReview(env, ask, broken("html"))).provider).toBe("anthropic");
+    expect(calls).toEqual(["gemini", "anthropic", "gemini", "anthropic"]);
   });
 });
 
@@ -217,6 +236,23 @@ describe("files after a send", () => {
     const now = (await t.api(`/api/cad/robots/${robotId}`, { session: sam })).body.parts.find((p: any) => p.ck_part_key === "doc9:ps:A:default");
     expect((await fetch(`${t.base}${now.ck_picture_url}`, { headers: { cookie: `cp_session=${encodeURIComponent(olive)}` } })).status).toBe(403);
     expect((await ck(base, { token, body: { pictures: [] } })).status).toBe(400);
+    // Deleting a part takes its picture file with it.
+    const pictureId = Number(now.ck_picture_url.split("/").pop());
+    await t.db.execute({ sql: "UPDATE cad_parts SET ck_removed_at = ? WHERE id = ?", args: [new Date().toISOString(), now.id] });
+    expect((await t.api(`/api/cad/parts/${now.id}`, { method: "DELETE", session: sam })).status).toBe(200);
+    expect(Number(((await t.db.execute({ sql: "SELECT COUNT(*) AS n FROM stored_files WHERE id = ?", args: [pictureId] })).rows[0] as any).n)).toBe(0);
+  });
+
+  it("offers the newest stored STEP zip and workbook across every send, past the ten listed", async () => {
+    const before = (await t.api(`/api/cad/robots/${robotId}`, { session: sam })).body.downloads;
+    expect(before.step).toMatchObject({ importId, file: { name: "Drive STEP.zip" } });
+    for (let i = 0; i < 11; i++) {
+      const r = await ck(`/api/integrations/control-kit/workspaces/${team}/bom`, { token, body: payload(`many-${i}`, { files: [], cadParts: [cad(i % 2 ? "A" : "B")] }) });
+      expect(r.status).toBe(200);
+    }
+    const detail = (await t.api(`/api/cad/robots/${robotId}`, { session: sam })).body;
+    expect(detail.imports.some((i: any) => i.id === importId)).toBe(false);
+    expect(detail.downloads.step).toMatchObject({ importId, file: { name: "Drive STEP.zip", url: before.step.file.url } });
   });
 });
 

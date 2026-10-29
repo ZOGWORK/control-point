@@ -59,19 +59,32 @@ export function checkReviewAsk(body: unknown): { ok: true; ask: ReviewAsk } | { 
   return { ok: true, ask: { instructions, schema, geminiSchema, request } };
 }
 
-async function timed(fetcher: typeof fetch, url: string, init: RequestInit, ms: number, label: string) {
-  try { return await fetcher(url, { ...init, signal: AbortSignal.timeout(ms) }); }
-  catch (e: any) {
+/**
+ * One provider call, its body read inside the same deadline: a dropped connection or the deadline passing while the body
+ * arrives is a failure (worth failing over for), never an empty answer. A 2xx whose body is not the provider's JSON
+ * envelope fails the same way; only the model's own text may be unparseable, which is an answer with no items.
+ */
+async function call(fetcher: typeof fetch, url: string, init: RequestInit, ms: number, label: string): Promise<{ res: Response; body: any }> {
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetcher(url, { ...init, signal: AbortSignal.timeout(ms) });
+    text = await res.text();
+  } catch (e: any) {
     if (e?.name === "TimeoutError" || e?.name === "AbortError") throw new ReviewError(504, "ai_timeout", `${label} did not answer within ${ms / 1000} seconds.`, true);
     throw new ReviewError(502, "ai_failed", `Could not reach ${label}.`, true);
   }
+  if (!res.ok) return { res, body: null };
+  const body = parsed(text);
+  if (!body || typeof body !== "object") throw new ReviewError(502, "ai_failed", `${label} sent an unreadable response.`, true);
+  return { res, body };
 }
 const parsed = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
 
 async function askGemini(env: Env, ask: ReviewAsk, fetcher: typeof fetch): Promise<ReviewAnswer> {
   const base = env.GEMINI_API_BASE || "https://generativelanguage.googleapis.com/v1beta";
   const model = env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
-  const res = await timed(fetcher, `${base}/models/${encodeURIComponent(model)}:generateContent`, {
+  const { res, body } = await call(fetcher, `${base}/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey(env) },
     body: JSON.stringify({ systemInstruction: { parts: [{ text: ask.instructions }] }, contents: [{ role: "user", parts: [{ text: JSON.stringify(ask.request) }] }],
       generationConfig: { responseMimeType: "application/json", responseSchema: ask.geminiSchema } }),
@@ -81,14 +94,13 @@ async function askGemini(env: Env, ask: ReviewAsk, fetcher: typeof fetch): Promi
     throw new ReviewError(res.status === 429 ? 429 : 502, res.status === 429 ? "rate_limited" : "ai_failed",
       res.status === 429 ? "Gemini rate limit reached." : failover ? `Gemini failed (HTTP ${res.status}).` : `Gemini rejected the request (HTTP ${res.status}).`, failover);
   }
-  const body: any = await res.json().catch(() => null);
   const text = (body?.candidates?.[0]?.content?.parts ?? []).map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("");
   return { output: parsed(text), provider: "gemini", usage: { inputTokens: body?.usageMetadata?.promptTokenCount ?? null, outputTokens: body?.usageMetadata?.candidatesTokenCount ?? null } };
 }
 
 async function askAnthropic(env: Env, ask: ReviewAsk, fetcher: typeof fetch): Promise<ReviewAnswer> {
   const base = env.ANTHROPIC_API_BASE || "https://api.anthropic.com/v1";
-  const res = await timed(fetcher, `${base}/messages`, {
+  const { res, body } = await call(fetcher, `${base}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": anthropicKey(env), "anthropic-version": "2023-06-01", "anthropic-beta": "server-side-fallback-2026-07-01" },
     body: JSON.stringify({ model: env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL, max_tokens: 16000, system: ask.instructions, fallbacks: "default",
@@ -98,7 +110,6 @@ async function askAnthropic(env: Env, ask: ReviewAsk, fetcher: typeof fetch): Pr
     throw new ReviewError(res.status === 429 ? 429 : 502, res.status === 429 ? "rate_limited" : "ai_failed",
       res.status === 429 ? "Anthropic rate limit reached." : res.status >= 500 ? `Anthropic failed (HTTP ${res.status}).` : `Anthropic rejected the request (HTTP ${res.status}).`);
   }
-  const body: any = await res.json().catch(() => null);
   if (body?.stop_reason === "refusal") throw new ReviewError(502, "ai_failed", "Anthropic declined the request.");
   if (body?.stop_reason === "max_tokens") throw new ReviewError(502, "ai_failed", "Anthropic's answer was cut off.");
   const text = (body?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join("");

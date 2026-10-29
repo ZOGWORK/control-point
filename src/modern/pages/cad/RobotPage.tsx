@@ -58,10 +58,18 @@ export function latestFile(imports: RobotImport[], pattern: RegExp): { file: Imp
 const STEP_ZIP = /\.zip$/i;
 const WORKBOOK = /\.xlsx$/i;
 
+/** The newest stored zip or workbook: the server's answer across every send, else the listed sends (an older server). */
+function newestDownload(data: RobotDetail, kind: 'step' | 'workbook') {
+  const found = data.downloads?.[kind];
+  if (found) return { file: { ...found.file, stored: true, sizeBytes: found.file.sizeBytes ?? undefined } as ImportFile, sent: { id: found.importId, sentAt: found.sentAt } };
+  return latestFile(data.imports, kind === 'step' ? STEP_ZIP : WORKBOOK);
+}
+
 /** Download the robot's STEP files and workbook straight from Control Point. */
-function Downloads({ imports, compact = false }: { imports: RobotImport[]; compact?: boolean }) {
-  const step = latestFile(imports, STEP_ZIP);
-  const book = latestFile(imports, WORKBOOK);
+function Downloads({ data, compact = false }: { data: RobotDetail; compact?: boolean }) {
+  const imports = data.imports;
+  const step = newestDownload(data, 'step');
+  const book = newestDownload(data, 'workbook');
   if (!step && !book) return compact ? null : <p className="text-sm text-muted-foreground">No STEP files or workbook yet. In Control Kit, send this assembly, then press Add STEP files.</p>;
   const older = !!step && !!imports[0] && step.sent.id !== imports[0].id;
   return (
@@ -76,9 +84,10 @@ function Downloads({ imports, compact = false }: { imports: RobotImport[]; compa
 
 /** A part's Onshape picture, drawn by Control Kit, on the same dark stage Control Kit uses (its pictures are transparent). */
 export function PartPicture({ url, name, className }: { url: string | null | undefined; name: string; className?: string }) {
-  const [broken, setBroken] = useState(false);
-  if (!url || broken) return null;
-  return <img src={url} alt={`${name} in Onshape`} loading="lazy" onError={() => setBroken(true)} className={cn('rounded-lg bg-[#26262b] object-contain', className)} />;
+  // Which URL failed: a replacement picture (new URL) gets its own chance to load.
+  const [broken, setBroken] = useState<string | null>(null);
+  if (!url || broken === url) return null;
+  return <img src={url} alt={`${name} in Onshape`} loading="lazy" onError={() => setBroken(url)} className={cn('rounded-lg bg-[#26262b] object-contain', className)} />;
 }
 
 export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; currentUser?: any; isAdmin: boolean }) {
@@ -119,7 +128,7 @@ export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; 
                   : <span>No assembly linked</span>}
                 {d.imports[0] && <span>Last sent {fmtDate(d.imports[0].sentAt)}{d.imports[0].sentBy ? ` by ${d.imports[0].sentBy}` : ''}</span>}
               </p>
-              <div className="mt-4"><Downloads imports={d.imports} compact /></div>
+              <div className="mt-4"><Downloads data={d} compact /></div>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button asChild variant="outline" size="sm"><a href={CONTROL_KIT_URL} target="_blank" rel="noopener noreferrer"><img src={CONTROL_KIT_ICON} alt="" aria-hidden className="size-4 rounded-[3px]" /> Rescan in Control Kit<span className="sr-only"> (opens in a new tab)</span></a></Button>
                 {d.canManage && (
@@ -147,7 +156,7 @@ export function RobotPage({ robotId, currentUser, isAdmin }: { robotId: number; 
           </TabsList>
         </Tabs>
         {tab === 'bom' && <RobotBom ctl={ctl} data={d} />}
-        {tab === 'files' && <RobotFiles imports={d.imports} />}
+        {tab === 'files' && <RobotFiles data={d} />}
         {tab === 'reviews' && <CadReviewsTab currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === 'snapshots' && <CadSnapshotsTab currentUser={currentUser} isAdmin={isAdmin} />}
         {tab === 'sends' && <RobotSends imports={d.imports} />}
@@ -234,7 +243,7 @@ function RobotBom({ ctl, data }: { ctl: ReturnType<typeof useRobot>; data: Robot
         BOM_GROUPS.map((g) => {
           const items = shown.filter((p) => p.effective.group === g);
           if (!items.length) return null;
-          return <BomGroupTable key={g} group={g} items={items} onOpen={setOpen} highlight={importId} saving={ctl.saving} stepZip={g === 'make' ? latestFile(data.imports, STEP_ZIP)?.file : null} />;
+          return <BomGroupTable key={g} group={g} items={items} onOpen={setOpen} highlight={importId} saving={ctl.saving} stepZip={g === 'make' ? newestDownload(data, 'step')?.file : null} />;
         })
       )}
       {removed.length > 0 && (
@@ -452,14 +461,14 @@ function CandidateRow({ c, qty, chosen, settled, canManage, busy, onUse }: { c: 
 // Files and sends
 // ---------------------------------------------------------------------------
 
-function RobotFiles({ imports }: { imports: RobotImport[] }) {
-  const latest = imports.find((i) => i.files.length);
+function RobotFiles({ data }: { data: RobotDetail }) {
+  const latest = data.imports.find((i) => i.files.length);
   return (
     <>
       <section className="mb-8">
         <h2 className="mb-1 text-base font-semibold">Downloads</h2>
         <p className="mb-3 text-sm text-muted-foreground">STEP files for every part to make (one ZIP with a manifest) and the BOM workbook, from the newest send that has them.</p>
-        <Downloads imports={imports} />
+        <Downloads data={data} />
       </section>
       <section className="mb-8">
         <h2 className="mb-1 text-base font-semibold">From the latest send</h2>

@@ -76,11 +76,16 @@ function fillsPlaceholder(entry: any, name: string): boolean {
   if (/\.csv$/i.test(name)) return /\.csv$/i.test(n);
   return false;
 }
-/** An import's files with `upload` in place of the entry of the same name, or of the placeholder it fills, else appended. */
-export function withUploadedFile(files: any[], upload: any): any[] {
+/** How many entries an import's file list may reach through uploads; a full list refuses a new name rather than drop one. */
+export const MAX_IMPORT_FILES = 2 * MAX_FILES;
+/**
+ * An import's files with `upload` in place of the entry of the same name, or of the placeholder it fills, else appended.
+ * Null when appending would pass MAX_IMPORT_FILES: no existing entry is ever dropped to make room.
+ */
+export function withUploadedFile(files: any[], upload: any): any[] | null {
   const same = files.findIndex((f) => f?.name === upload.name);
   const at = same >= 0 ? same : files.findIndex((f) => fillsPlaceholder(f, upload.name));
-  if (at < 0) return [...files, upload].slice(-MAX_FILES);
+  if (at < 0) return files.length >= MAX_IMPORT_FILES ? null : [...files, upload];
   return files.map((f, i) => (i === at ? upload : f));
 }
 /** An unfinished import whose claim is older than this was abandoned; a retry finishes it. */
@@ -457,6 +462,7 @@ export function createControlKitLink(deps: ControlKitDeps) {
     if (earlier && String(earlier.sha256 || "").toLowerCase() === want) {
       return res.json({ name, url: earlier.url, sizeBytes: buffer.length, sha256: want, duplicate: true });
     }
+    if (!withUploadedFile(parseFiles(row.files), { name })) return res.status(409).json({ error: "too_many_files", detail: `An import holds at most ${MAX_IMPORT_FILES} files.` });
     const fileId = await deps.storeFile({ teamId, memberId: Number(req.ck.team.member_id), kind: "cad", filename: name, mimeType: mediaType, buffer });
     const url = deps.fileUrl(fileId);
     const entry = { name, mediaType, sizeBytes: buffer.length, sha256: want, stored: true, url, uploadedAt: new Date().toISOString() };
@@ -464,17 +470,27 @@ export function createControlKitLink(deps: ControlKitDeps) {
       const current = await dbGet("SELECT files FROM cad_imports WHERE id = ?", row.id);
       const before = parseFiles(current?.files);
       const replaced = before.find((f) => f?.name === name && f?.stored && f?.url);
-      const next = withUploadedFile(before, entry);
-      const swapped = await dbRun(
-        "UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?) WHERE id = ? AND COALESCE(files, '') = COALESCE(?, '')",
-        JSON.stringify(next), next.filter((f) => f?.stored).length, row.id, current?.files ?? null);
-      if (!swapped.changes) continue;
-      await dbRun("INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id, robot_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        teamId, name, url, Number(req.ck.team.member_id), entry.uploadedAt, row.id, row.robot_id ?? null);
-      if (replaced) {
-        await dbRun("DELETE FROM cad_docs WHERE team_id = ? AND ck_import_id = ? AND url = ?", teamId, row.id, replaced.url);
-        await dropStored(replaced.url);
+      // The same bytes arrived meanwhile (a retry racing this one): keep that file, drop this copy.
+      if (replaced && String(replaced.sha256 || "").toLowerCase() === want) {
+        await dropStored(url);
+        return res.json({ name, url: replaced.url, sizeBytes: buffer.length, sha256: want, duplicate: true });
       }
+      const next = withUploadedFile(before, entry);
+      if (!next) { await dropStored(url); return res.status(409).json({ error: "too_many_files", detail: `An import holds at most ${MAX_IMPORT_FILES} files.` }); }
+      const nextJson = JSON.stringify(next);
+      // One transaction: the list swap, this file's document, and removing the document it replaces. The document
+      // statements run only when this request's swap is the list now, so an overlapping upload never leaves a
+      // document pointing at bytes another upload deleted.
+      const [swapped] = await deps.dbBatchResults([
+        { sql: "UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?) WHERE id = ? AND COALESCE(files, '') = COALESCE(?, '')",
+          args: [nextJson, next.filter((f) => f?.stored).length, row.id, current?.files ?? null] },
+        { sql: "INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id, robot_id) SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM cad_imports WHERE id = ? AND files = ?)",
+          args: [teamId, name, url, Number(req.ck.team.member_id), entry.uploadedAt, row.id, row.robot_id ?? null, row.id, nextJson] },
+        { sql: "DELETE FROM cad_docs WHERE team_id = ? AND ck_import_id = ? AND url = ? AND EXISTS (SELECT 1 FROM cad_imports WHERE id = ? AND files = ?)",
+          args: [teamId, row.id, replaced?.url ?? "", row.id, nextJson] },
+      ]);
+      if (!swapped.changes) continue;
+      if (replaced) await dropStored(replaced.url);
       return res.json({ name, url, sizeBytes: buffer.length, sha256: want, duplicate: false });
     }
     await dropStored(url);
