@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import crypto from "crypto";
-import { buildCsp, inlineScriptHashes, summarizeCspReport } from "../csp";
+import { buildArticleCsp, buildCsp, inlineScriptHashes, summarizeCspReport } from "../csp";
 import { startTestServer, type TestServer } from "./helpers/testServer";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -42,6 +42,26 @@ describe("CSP policy", () => {
     // Reporting API shape.
     expect(summarizeCspReport([{ body: { effectiveDirective: "script-src", blockedURL: "inline", documentURL: "https://a.test/x" } }]))
       .toEqual({ message: "CSP script-src blocked inline", route: "/x" });
+  });
+
+  it("drops violations caused by a browser extension's script", () => {
+    expect(summarizeCspReport({ "csp-report": {
+      "document-uri": "https://tryctrlpoint.org/calendar",
+      "effective-directive": "script-src",
+      "blocked-uri": "eval",
+      "source-file": "chrome-extension://abcdefghijklmnop",
+    } })).toBeNull();
+    expect(summarizeCspReport([{ body: { effectiveDirective: "script-src", blockedURL: "eval", sourceFile: "moz-extension://1234/content.js", documentURL: "https://a.test/chat" } }]))
+      .toBeNull();
+    expect(summarizeCspReport({ "csp-report": { "document-uri": "https://a.test/x", "effective-directive": "script-src-elem", "blocked-uri": "safari-web-extension://x/inject.js" } }))
+      .toBeNull();
+    // Our own eval would still be reported.
+    expect(summarizeCspReport({ "csp-report": { "document-uri": "https://a.test/chat", "effective-directive": "script-src", "blocked-uri": "eval", "source-file": "https://a.test/assets/index-x.js" } }))
+      .toEqual({ message: "CSP script-src blocked eval", route: "/chat" });
+  });
+
+  it("lets the Predict article load the web manifest it links", () => {
+    expect(buildArticleCsp({ scriptHashes: [] })).toContain("manifest-src 'self'");
   });
 });
 

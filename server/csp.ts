@@ -54,8 +54,9 @@ export function buildCsp({ scriptHashes, reportUri }: { scriptHashes: string[]; 
 
 /**
  * Policy for the standalone Predict article (/predict/how-it-works): a
- * static page with one inline script (pinned by hash), inline styles, and
- * Google Fonts. It loads nothing else and talks to no API.
+ * static page with one inline script (pinned by hash), inline styles,
+ * Google Fonts, and the app's web manifest (its <link rel="manifest">).
+ * It loads nothing else and talks to no API.
  */
 export function buildArticleCsp({ scriptHashes, reportUri }: { scriptHashes: string[]; reportUri?: string }): string {
   const directives: [string, string[]][] = [
@@ -64,6 +65,7 @@ export function buildArticleCsp({ scriptHashes, reportUri }: { scriptHashes: str
     ["style-src", ["'unsafe-inline'", "https://fonts.googleapis.com"]],
     ["font-src", ["https://fonts.gstatic.com"]],
     ["img-src", ["'self'", "data:"]],
+    ["manifest-src", ["'self'"]],
     ["base-uri", ["'none'"]],
     ["form-action", ["'none'"]],
     ["frame-ancestors", ["'none'"]],
@@ -72,13 +74,22 @@ export function buildArticleCsp({ scriptHashes, reportUri }: { scriptHashes: str
   return directives.map(([k, v]) => `${k} ${v.join(" ")}`).join("; ");
 }
 
-/** A browser CSP violation report (legacy `csp-report` or Reporting API body). */
+/** Script schemes of browser extensions, whose injected code our policy also reports. */
+const EXTENSION_SOURCE = /^(chrome|moz|safari|safari-web|ms-browser)-extension:/i;
+
+/**
+ * A browser CSP violation report (legacy `csp-report` or Reporting API body).
+ * Null for unreadable reports and for violations caused by an extension's
+ * script (an extension calling eval on our page): not ours to fix.
+ */
 export function summarizeCspReport(body: any): { message: string; route: string } | null {
   const r = body?.["csp-report"] || (Array.isArray(body) ? body[0]?.body : body?.body) || null;
   if (!r || typeof r !== "object") return null;
   const directive = String(r["effective-directive"] || r.effectiveDirective || r["violated-directive"] || r.violatedDirective || "").slice(0, 60);
   const blocked = String(r["blocked-uri"] || r.blockedURL || "").slice(0, 200);
   if (!directive) return null;
+  const source = String(r["source-file"] || r.sourceFile || "");
+  if (EXTENSION_SOURCE.test(source) || EXTENSION_SOURCE.test(blocked)) return null;
   // Origin only: never store query strings or paths that might carry data.
   let what = blocked;
   try { if (/^https?:/i.test(blocked)) what = new URL(blocked).origin; } catch { /* keep raw keyword (inline/eval/data) */ }
