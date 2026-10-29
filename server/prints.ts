@@ -126,6 +126,8 @@ const intOrNull = (v: unknown, max: number): number | null | undefined => {
   return Number.isInteger(n) && n >= 0 && n <= max ? n : undefined;
 };
 const ids = (raw: unknown): number[] => (Array.isArray(raw) ? [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))] : []);
+/** Download tickets for chosen files: who asked, in which workspace, which files; five minutes. In memory (one server). */
+const zipTickets = new Map<string, { teamId: number; memberId: number; ids: number[]; name: string; exp: number }>();
 const qs = (n: number) => Array(n).fill("?").join(",");
 /** A Content-Disposition that keeps a UTF-8 name ("2025–26 DECODE.zip"). */
 function disposition(kind: "attachment" | "inline", name: string) {
@@ -767,6 +769,21 @@ export function createPrints(deps: PrintDeps) {
 
     // A ZIP of a folder (?folder=<id>|root, everything below it) or of chosen files (?files=1,2,3, kept in their
     // folders). ?name= names the ZIP (a group's name).
+    // A download ticket for chosen files (a group's "Download all" can name thousands): the page then opens the GET.
+    app.post("/api/prints/zip", async (req, res) => {
+      try {
+        const a = await access(req, res, false); if (!a) return;
+        const list = ids(req.body?.ids);
+        if (!list.length) return res.status(400).json({ error: "Pick some files" });
+        if (list.length > ZIP_MAX_ENTRIES) return res.status(413).json({ error: `One download holds at most ${ZIP_MAX_ENTRIES.toLocaleString("en-US")} files. Pick fewer.` });
+        for (const [k, v] of zipTickets) if (v.exp < Date.now()) zipTickets.delete(k);
+        if (zipTickets.size > 5000) return res.status(429).json({ error: "Too many downloads are being prepared. Try again in a minute." });
+        const ticket = randomBytes(18).toString("base64url");
+        zipTickets.set(ticket, { teamId: a.teamId, memberId: a.auth.memberId, ids: list, name: typeof req.body?.name === "string" ? req.body.name.slice(0, 120) : "", exp: Date.now() + 5 * 60_000 });
+        res.json({ url: `/api/prints/zip?ticket=${ticket}` });
+      } catch (e) { sendError(res, e, "zip ticket"); }
+    });
+
     app.get("/api/prints/zip", async (req, res) => {
       try {
         const a = await access(req, res, false); if (!a) return;
@@ -784,10 +801,21 @@ export function createPrints(deps: PrintDeps) {
             rows = await dbAll(`SELECT id, name, folder_id, size, storage_key, updated_at FROM print_files WHERE team_id = ? AND folder_id IN (${qs(tree.length)})`, a.teamId, ...tree);
           }
         } else {
-          const list = String(req.query.files || "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 5000);
+          // Chosen files: a ticket from POST /api/prints/zip (any number), or ?files= for a short list.
+          let list: number[];
+          let name: unknown = req.query.name;
+          if (typeof req.query.ticket === "string") {
+            const tk = zipTickets.get(req.query.ticket);
+            if (!tk || tk.exp < Date.now() || tk.teamId !== a.teamId || tk.memberId !== a.auth.memberId) return res.status(404).json({ error: "This download link has expired. Start the download again." });
+            list = tk.ids;
+            name = tk.name;
+          } else {
+            list = String(req.query.files || "").split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0);
+          }
           if (!list.length) return res.status(400).json({ error: "Pick some files" });
-          rows = await dbAll(`SELECT id, name, folder_id, size, storage_key, updated_at FROM print_files WHERE team_id = ? AND id IN (${qs(list.length)})`, a.teamId, ...list);
-          if (typeof req.query.name === "string" && req.query.name.trim()) zipName = safeName(req.query.name, "Prints");
+          if (list.length > ZIP_MAX_ENTRIES) return res.status(413).json({ error: `One download holds at most ${ZIP_MAX_ENTRIES.toLocaleString("en-US")} files. Pick fewer.` });
+          rows = await dbAll("SELECT id, name, folder_id, size, storage_key, updated_at FROM print_files WHERE team_id = ? AND id IN (SELECT value FROM json_each(?))", a.teamId, JSON.stringify(list));
+          if (typeof name === "string" && name.trim()) zipName = safeName(name, "Prints");
         }
         if (!rows.length) return res.status(404).json({ error: "There are no files to download here" });
         if (rows.length > ZIP_MAX_ENTRIES) return res.status(413).json({ error: `One download holds at most ${ZIP_MAX_ENTRIES.toLocaleString("en-US")} files. Download smaller folders.` });

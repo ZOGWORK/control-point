@@ -2,7 +2,7 @@
 // added it, and the details its smart groups come from (robot and season, CAD
 // part, subsystem, material, status, copies), plus its collections, notes and
 // history. People without manage_prints see the same details read-only.
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Box, Download, ExternalLink, FolderInput, Minus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea } from '../../../components/ui-kit';
 import { cn } from '../../../components/cn';
@@ -37,6 +37,28 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
   const id = useId();
   const edit = lib.canEdit;
   const [notes, setNotes] = useState(file.notes);
+  // Copies printed as clicked: shown at once and saved once the clicks stop (each click reading a stale count lost copies).
+  const [copies, setCopies] = useState(file.copiesPrinted);
+  const copiesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCopies = useRef<number | null>(null);
+  useEffect(() => { if (pendingCopies.current === null) setCopies(file.copiesPrinted); }, [file.id, file.copiesPrinted]);
+  const stepCopies = (delta: number) => {
+    const next = Math.max(0, Math.min(999, (pendingCopies.current ?? copies) + delta));
+    pendingCopies.current = next;
+    setCopies(next);
+    if (copiesTimer.current) clearTimeout(copiesTimer.current);
+    copiesTimer.current = setTimeout(() => {
+      const value = pendingCopies.current;
+      copiesTimer.current = null;
+      if (value === null) return;
+      void save({ copiesPrinted: value }).finally(() => { if (pendingCopies.current === value) pendingCopies.current = null; });
+    }, 500);
+  };
+  // A count still waiting when the sheet closes is saved then.
+  useEffect(() => () => {
+    if (copiesTimer.current) { clearTimeout(copiesTimer.current); if (pendingCopies.current !== null) void prints.updateFile(file.id, { copiesPrinted: pendingCopies.current }).catch(() => {}); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [file.id]);
   const [parts, setParts] = useState<{ id: number; name: string; section: string; quantity: number; group: string }[] | null>(null);
   const [history, setHistory] = useState<{ id: number; by: string; action: string; detail: any; at: string }[] | null>(null);
   useEffect(() => { setNotes(file.notes); }, [file.id, file.notes]);
@@ -71,7 +93,7 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
     return [...new Set([now + 1, now, now - 1, now - 2, now - 3, ...lib.robots.map((r) => r.season), ...(file.season != null ? [file.season] : [])])].sort((a, b) => b - a);
   }, [lib.robots, file.season]);
   const subsystemOptions = useMemo(() => [...new Set([...lib.subsystems, ...lib.files.map((f) => f.subsystem).filter(Boolean) as string[]])], [lib]);
-  const copies = copiesText(file);
+  const copiesLabel = copiesText(file);
 
   return (
     <Sheet open onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -113,9 +135,9 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {edit ? (
               <>
-                <Button size="icon" variant="outline" className="size-10" aria-label="One fewer printed" disabled={file.copiesPrinted <= 0} onClick={() => void save({ copiesPrinted: file.copiesPrinted - 1 })}><Minus /></Button>
-                <span className="min-w-6 text-center text-base font-semibold tabular-nums" aria-live="polite">{file.copiesPrinted}</span>
-                <Button size="icon" variant="outline" className="size-10" aria-label="One more printed" onClick={() => void save({ copiesPrinted: file.copiesPrinted + 1 })}><Plus /></Button>
+                <Button size="icon" variant="outline" className="size-10" aria-label="One fewer printed" disabled={copies <= 0} onClick={() => stepCopies(-1)}><Minus /></Button>
+                <span className="min-w-6 text-center text-base font-semibold tabular-nums" aria-live="polite">{copies}</span>
+                <Button size="icon" variant="outline" className="size-10" aria-label="One more printed" disabled={copies >= 999} onClick={() => stepCopies(1)}><Plus /></Button>
                 <span className="text-muted-foreground">printed of</span>
                 <input id={`${id}-need`} type="number" min={0} max={999} inputMode="numeric" aria-label="Copies the robot needs" className={cn(field, 'w-20')}
                   key={`${file.id}-${file.copiesNeeded}-${file.copiesNeededFrom}`}
@@ -128,7 +150,7 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
                   }} />
                 <span className="text-muted-foreground">needed</span>
               </>
-            ) : <span>{copies ?? 'Not counted'}</span>}
+            ) : <span>{copiesLabel ?? "Not counted"}</span>}
           </div>
           {file.copiesNeededFrom === 'cad' && <p className="text-xs text-muted-foreground">The robot needs {file.copiesNeeded}, from the CAD part's quantity.</p>}
         </Row>

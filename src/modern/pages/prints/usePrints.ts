@@ -31,7 +31,11 @@ const send = (method: string, body?: unknown): RequestInit => ({ method, body: b
 export const fileUrl = (id: number) => `/api/prints/files/${id}/download`;
 export const thumbUrl = (f: Pick<PrintFile, 'id' | 'updatedAt'>) => `/api/prints/files/${f.id}/thumbnail?v=${encodeURIComponent(f.updatedAt)}`;
 export const folderZipUrl = (folderId: number | null) => `/api/prints/zip?folder=${folderId ?? 'root'}`;
-export const filesZipUrl = (ids: number[], name: string) => `/api/prints/zip?files=${ids.join(',')}&name=${encodeURIComponent(name)}`;
+/** Download chosen files as one ZIP: a short-lived ticket names them (a URL can't carry thousands of ids). */
+export async function downloadFiles(ids: number[], name: string) {
+  const { url } = await call<{ url: string }>('/api/prints/zip', { method: 'POST', body: JSON.stringify({ ids, name }) });
+  download(url);
+}
 
 /** Start a download by URL (the browser streams it; nothing is held in memory). */
 export function download(url: string) {

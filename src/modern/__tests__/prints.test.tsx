@@ -53,6 +53,7 @@ beforeEach(() => {
   api.apiFetch.mockImplementation((url: string, init?: any) => {
     if (url === '/api/prints/library') return res(lib);
     if (url.startsWith('/api/prints/activity')) return res([]);
+    if (url === '/api/prints/zip') return res({ url: '/api/prints/zip?ticket=t1' });
     if (url.startsWith('/api/cad/robots/')) return res({ parts: [] });
     return res({ success: true, files: 1 });
   });
@@ -126,8 +127,10 @@ describe('Prints explorer', () => {
     fireEvent.click(within(bar).getByRole('button', { name: 'Printed' }));
     await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/files/bulk', method: 'POST', body: { ids: [1, 2], action: 'status', status: 'printed' } }));
     fireEvent.click(screen.getByRole('button', { name: 'Download all' }));
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/zip', method: 'POST', body: { ids: [1, 2], name: 'Intake' } }));
+    await waitFor(() => expect(click).toHaveBeenCalled());
     const a = click.mock.instances[0] as unknown as HTMLAnchorElement;
-    expect(a.getAttribute('href')).toBe('/api/prints/zip?files=1,2&name=Intake');
+    expect(a.getAttribute('href')).toBe('/api/prints/zip?ticket=t1');
     click.mockRestore();
   });
 
@@ -188,6 +191,17 @@ describe('Prints explorer', () => {
     expect(within(sheet).getByRole('button', { name: 'Comp spares' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(within(sheet).getByRole('radio', { name: 'Printing' }));
     await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/files/1', method: 'PATCH', body: { status: 'printing' } }));
+  });
+
+  it('counts quick clicks on the copies stepper and saves them once', async () => {
+    setup('/prints?folder=2');
+    await screen.findByRole('heading', { name: /Intake ·/ });
+    fireEvent.click(item('Roller hub.stl'));
+    const sheet = await screen.findByRole('dialog', { name: 'Roller hub.stl' });
+    const more = within(sheet).getByRole('button', { name: 'One more printed' });
+    fireEvent.click(more); fireEvent.click(more); fireEvent.click(more);
+    expect(within(sheet).getByText('3')).toBeTruthy();
+    await waitFor(() => expect(calls().filter((c) => c.url === '/api/prints/files/1')).toEqual([{ url: '/api/prints/files/1', method: 'PATCH', body: { copiesPrinted: 3 } }]));
   });
 
   it('is read-only for members without manage_prints', async () => {

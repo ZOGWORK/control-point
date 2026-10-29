@@ -425,6 +425,13 @@ describe("groups, details and downloads", () => {
     const g = await raw(`/api/prints/zip?files=${a.body.id},${b.body.id}&name=Intake`, student);
     expect(Object.keys(unzip(g.bytes)).sort()).toEqual(["2025–26 DECODE/Intake/b.gcode", "2025–26 DECODE/a.stl"]);
     expect(g.headers.get("content-disposition")).toContain('filename="Intake.zip"');
+    // A group of any size goes through a ticket, valid only for the person who asked.
+    const tk = await t.post("/api/prints/zip", { ids: [a.body.id, b.body.id], name: "Intake + PETG" }, student);
+    expect(tk.body.url).toMatch(/^\/api\/prints\/zip\?ticket=/);
+    const viaTicket = await raw(tk.body.url, student);
+    expect(Object.keys(unzip(viaTicket.bytes)).sort()).toEqual(["2025–26 DECODE/Intake/b.gcode", "2025–26 DECODE/a.stl"]);
+    expect((await raw(tk.body.url, admin)).status).toBe(404);
+    expect((await t.post("/api/prints/zip", { ids: Array.from({ length: 65_536 }, (_, i) => i + 1) }, student)).status).toBe(413);
     const emptyFolder = await t.post("/api/prints/folders", { name: "Nothing" }, admin);
     expect((await raw(`/api/prints/zip?folder=${emptyFolder.body.id}`, admin)).status).toBe(404);
     await del(`/api/prints/folders/${top.body.id}?files=2`, admin);
@@ -539,6 +546,30 @@ describe("Control Kit's STEP zip", () => {
     // CNC parts are not prints.
     expect(l.files.some((f: any) => f.name.startsWith("Arm plate"))).toBe(false);
     expect((await raw(`/api/prints/files/${hit.id}/download`, admin)).bytes.toString()).toContain("claw");
+    // Someone whose role can't change Prints sends from Control Kit: the zip is stored as a CAD doc, nothing is filed.
+    const sr = await t.post("/api/integrations/control-kit/authorize", { state: "s", redirect_uri: CK_REDIRECT }, student);
+    const scode = new URL(sr.body.redirect).searchParams.get("code")!;
+    const stok = await fetch(`${t.base}/api/integrations/control-kit/token`, { method: "POST", headers: { authorization: `Basic ${Buffer.from(`control-kit:${CK_SECRET}`).toString("base64")}`, "content-type": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", code: scode, redirect_uri: CK_REDIRECT }) });
+    const studentToken = (await stok.json()).access_token as string;
+    const zip2Files = { "Arm_STEP/3D_print/Viewer_part__JHD.step": "ISO-10303-21;\nviewer\nEND-ISO-10303-21;\n" };
+    const e2 = Object.entries(zip2Files).map(([name, text], i) => { const p = join(d, `v${i}`); writeFileSync(p, text); return { name, path: p, mtime: new Date() }; });
+    const out2 = new PassThrough(); const c2: Buffer[] = []; out2.on("data", (c) => c2.push(c));
+    await writeZip(out2, e2);
+    const zip2 = Buffer.concat(c2);
+    const sent2 = await fetch(`${t.base}/api/integrations/control-kit/workspaces/${team}/bom`, { method: "POST", headers: { authorization: `Bearer ${studentToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ ...JSON.parse(JSON.stringify({ idempotencyKey: "prints-zip-2" })), source: "control-kit", bundleVersion: 2,
+        assembly: { name: "Arm", documentId: "docZ", elementId: "asmZ", onshapeUrl: "https://cad.onshape.com/documents/docZ", assemblyUrl: "https://cad.onshape.com/documents/docZ/w/w1/e/asmZ", documentName: "Arm" },
+        revision: { type: "m", id: "m2" }, generatedAt: "2026-10-28T11:00:00.000Z", lines: [], suppressedLines: [], missingMetadataLines: [], suppressedCount: 0,
+        totals: { uniqueLines: 1, totalInstances: 3, totalCostUsd: null, outOfStockLines: 0 }, cadParts: [cad("JHD", "Claw finger")], controlPointCadUrl: "https://tryctrlpoint.org/cad-parts",
+        files: [{ name: "Arm STEP.zip", mediaType: "application/zip", sizeBytes: 9, sha256: "ab".repeat(32), delivery: "reference", reason: "Uploaded after this bundle." }], filesNotIncluded: [] }) });
+    const import2 = (await sent2.json()).importId;
+    const up2 = await fetch(`${t.base}/api/integrations/control-kit/workspaces/${team}/imports/${import2}/files?name=${encodeURIComponent("Arm STEP.zip")}`, { method: "POST",
+      headers: { authorization: `Bearer ${studentToken}`, "content-type": "application/zip", "x-content-sha256": createHash("sha256").update(zip2).digest("hex") }, body: zip2 });
+    expect(up2.status).toBe(200);
+    await new Promise((res) => setTimeout(res, 2000));
+    expect((await raw(`/api/prints/files/${hit.id}/download`, admin)).bytes.toString()).toContain("claw");
+    expect((await lib()).files.filter((f: any) => f.source === "control-kit" && f.robotId === robotId)).toHaveLength(1);
   });
 });
 

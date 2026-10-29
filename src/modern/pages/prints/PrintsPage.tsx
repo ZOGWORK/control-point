@@ -30,7 +30,7 @@ import { EmptyState, Page, PageHeader } from '../../ui/page';
 import { PrintDetails } from './PrintDetails';
 import { PrintsSidebar, type DropHandlers } from './PrintsSidebar';
 import { FileArt, FolderArt, MoveDialog, NameDialog, StatusChip, copiesText } from './printsUi';
-import { download, fileUrl, filesZipUrl, folderZipUrl, thumbnailFor, usePrints, type UploadItem } from './usePrints';
+import { download, downloadFiles, fileUrl, folderZipUrl, thumbnailFor, usePrints, type UploadItem } from './usePrints';
 
 const PrintViewer = React.lazy(() => import('../../../components/PrintViewer'));
 const DRAG = 'application/x-cp-prints';
@@ -254,7 +254,7 @@ export function PrintsPage() {
   };
   const downloadAll = () => {
     if (!lib) return;
-    if (groupMode) { if (shown.files.length) download(filesZipUrl(shown.files.map((f) => f.id), label || 'Prints')); }
+    if (groupMode) { if (shown.files.length) downloadFiles(shown.files.map((f) => f.id), label || 'Prints').catch(fail); }
     else if (filesBelow) download(folderZipUrl(folderId));
   };
 
@@ -492,7 +492,7 @@ export function PrintsPage() {
                 </DropdownMenu>
               )}
               {canEdit && <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => moveFiles([...selected])}><FolderInput /> Move to…</Button>}
-              <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => download(filesZipUrl([...selected], selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : label || here))}><Download /> Download</Button>
+              <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => downloadFiles([...selected], selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : label || here).catch(fail)}><Download /> Download</Button>
               {canEdit && <Button size="sm" variant="outline" className="h-10 text-destructive md:h-8" onClick={() => void deleteFiles([...selected])}><Trash2 className="size-4" /> Delete</Button>}
               <Button size="sm" variant="ghost" className="ml-auto h-10 md:h-8" onClick={() => setSelected(new Set())}>Clear</Button>
             </div>
