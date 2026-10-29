@@ -68,7 +68,7 @@ export class PrintError extends Error {
   constructor(public code: "unsupported" | "too_large" | "quota" | "disk_full" | "bad_name" | "empty", message: string, public status = 400) { super(message); }
 }
 
-/** Files on disk under random keys "<team>/<32 hex>" (+ ".thumb.png"). A key that doesn't look like one never becomes a path. */
+/** Files on disk under random keys "<team>/<32 hex>" (thumbnails add ".<8 hex>.thumb.png"). A key that doesn't look like one never becomes a path. */
 export class PrintStore {
   readonly files: string;
   readonly tmp: string;
@@ -80,7 +80,7 @@ export class PrintStore {
   }
   newKey(teamId: number) { return `${Math.trunc(teamId)}/${randomBytes(16).toString("hex")}`; }
   pathOf(key: string): string {
-    if (!/^\d{1,12}\/[0-9a-f]{32}(\.thumb\.png)?$/.test(key)) throw new Error("bad storage key");
+    if (!/^\d{1,12}\/[0-9a-f]{32}(\.[0-9a-f]{8}\.thumb\.png)?$/.test(key)) throw new Error("bad storage key");
     return path.join(this.files, ...key.split("/"));
   }
   async adopt(tmpPath: string, key: string) {
@@ -171,8 +171,9 @@ export function createPrints(deps: PrintDeps) {
     return { auth, teamId };
   }
   const now = () => new Date().toISOString();
-  const logStmt = (teamId: number, by: { id: number | null; name: string }, action: string, o: { fileId?: number | null; folderId?: number | null; detail?: unknown } = {}): Stmt => ({
-    sql: "INSERT INTO print_activity (team_id, file_id, folder_id, member_id, member_name, action, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  /** An activity row. With `ifChanged`, it is written only when the statement just before it in the batch changed a row. */
+  const logStmt = (teamId: number, by: { id: number | null; name: string }, action: string, o: { fileId?: number | null; folderId?: number | null; detail?: unknown; ifChanged?: boolean } = {}): Stmt => ({
+    sql: `INSERT INTO print_activity (team_id, file_id, folder_id, member_id, member_name, action, detail, at) SELECT ?, ?, ?, ?, ?, ?, ?, ?${o.ifChanged ? " WHERE changes() > 0" : ""}`,
     args: [teamId, o.fileId ?? null, o.folderId ?? null, by.id, by.name, action, JSON.stringify(o.detail ?? {}), now()],
   });
   const usedBytes = async (teamId: number) => Number((await dbGet("SELECT COALESCE(SUM(size + thumb_size), 0) AS n FROM print_files WHERE team_id = ?", teamId))?.n) || 0;
@@ -279,17 +280,23 @@ export function createPrints(deps: PrintDeps) {
   async function saveThumb(teamId: number, fileId: number, key: string, bytes: Buffer, by: { id: number | null; name: string } | null) {
     if (bytes.length > THUMB_MAX || !bytes.subarray(0, 8).equals(PNG_SIG)) throw new PrintError("unsupported", "Thumbnails are PNG images up to 512 KB");
     await checkDisk(bytes.length);
-    const thumbKey = `${key}.thumb.png`;
+    const thumbKey = `${key}.${randomBytes(4).toString("hex")}.thumb.png`;
+    const old = await dbGet("SELECT thumb_key FROM print_files WHERE id = ? AND team_id = ? AND storage_key = ?", fileId, teamId, key);
+    if (!old) return;
     await store.write(thumbKey, bytes);
     // Counted in the quota like the file itself (replacing any earlier thumbnail's size).
     const r = await dbRun(
-      `UPDATE print_files SET thumb_key = ?, thumb_size = ? WHERE id = ? AND team_id = ? AND storage_key = ?
+      `UPDATE print_files SET thumb_key = ?, thumb_size = ? WHERE id = ? AND team_id = ? AND storage_key = ? AND thumb_key IS ?
          AND (SELECT COALESCE(SUM(size + thumb_size), 0) FROM print_files WHERE team_id = ?) - thumb_size + ? <= ?`,
-      thumbKey, bytes.length, fileId, teamId, key, teamId, bytes.length, limits.quota);
+      thumbKey, bytes.length, fileId, teamId, key, old.thumb_key ?? null, teamId, bytes.length, limits.quota);
     if (!r.changes) {
+      // The image in use stays; only this attempt's file goes.
       await store.remove(thumbKey);
-      if (await dbGet("SELECT 1 FROM print_files WHERE id = ? AND team_id = ? AND storage_key = ?", fileId, teamId, key)) throw new PrintError("quota", quotaMessage(), 413);
+      const now2 = await dbGet("SELECT thumb_key FROM print_files WHERE id = ? AND team_id = ? AND storage_key = ?", fileId, teamId, key);
+      if (now2 && (now2.thumb_key ?? null) === (old.thumb_key ?? null)) throw new PrintError("quota", quotaMessage(), 413);
+      return;
     }
+    if (old.thumb_key) await store.remove(old.thumb_key);
     void by;
   }
   const sendError = (res: any, e: any, what: string) => {
@@ -388,8 +395,8 @@ export function createPrints(deps: PrintDeps) {
                     AND (? IS NULL OR ? NOT IN (${SUBTREE}))`,
             args: [name, parentId, now(), folder.id, a.teamId, parentId, parentId, a.teamId, parentId, parentId, folder.id, a.teamId, a.teamId] },
         ];
-        if (renamed) stmts.push(logStmt(a.teamId, by, "folder_rename", { folderId: Number(folder.id), detail: { from: folder.name, to: name } }));
-        if (moved) stmts.push(logStmt(a.teamId, by, "folder_move", { folderId: Number(folder.id), detail: { from: folder.parent_id ?? null, to: parentId } }));
+        if (renamed) stmts.push(logStmt(a.teamId, by, "folder_rename", { folderId: Number(folder.id), detail: { from: folder.name, to: name }, ifChanged: true }));
+        if (moved) stmts.push(logStmt(a.teamId, by, "folder_move", { folderId: Number(folder.id), detail: { from: folder.parent_id ?? null, to: parentId }, ifChanged: true }));
         try {
           const [r] = await deps.dbBatchResults(stmts);
           if (!r.changes) {
@@ -585,7 +592,7 @@ export function createPrints(deps: PrintDeps) {
         const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
         const stmts: Stmt[] = [{ sql: `UPDATE print_files SET ${sets.join(", ")}, updated_at = ? WHERE id = ? AND team_id = ? AND ${FOLDER_OK}`, args: [...args, now(), row.id, a.teamId, folderId, folderId, a.teamId] }];
         const action = changes.folderId !== undefined ? "move" : changes.name !== undefined ? "rename" : changes.status !== undefined && Object.keys(changes).length === 1 ? "status" : "edit";
-        stmts.push(logStmt(a.teamId, by, action, { fileId: Number(row.id), folderId, detail: { ...changes, ...(changes.name !== undefined ? { from: row.name } : {}) } }));
+        stmts.push(logStmt(a.teamId, by, action, { fileId: Number(row.id), folderId, detail: { ...changes, ...(changes.name !== undefined ? { from: row.name } : {}) }, ifChanged: true }));
         try {
           const [u] = await deps.dbBatchResults(stmts);
           if (!u.changes) return res.status(404).json({ error: "That folder no longer exists" });
