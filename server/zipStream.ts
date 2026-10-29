@@ -127,3 +127,42 @@ export function uniqueZipNames(names: string[]): string[] {
     return out;
   });
 }
+
+export interface ZipReadEntry { name: string; size: number; read: () => Promise<Buffer> }
+/**
+ * The entries of a classic ZIP (stored or deflated), from its central directory. `read` inflates one entry, refusing
+ * more than `maxEntryBytes` (a ZIP bomb stops there). Throws on ZIP64, encryption or a damaged directory.
+ */
+export function readZip(buf: Buffer, maxEntryBytes: number): ZipReadEntry[] {
+  const end = buf.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  if (end < 0 || end + 22 > buf.length) throw new Error("not a ZIP file");
+  const count = buf.readUInt16LE(end + 10);
+  let p = buf.readUInt32LE(end + 16);
+  if (count === 0xffff || p === 0xffffffff) throw new Error("ZIP64 is not supported");
+  const out: ZipReadEntry[] = [];
+  for (let i = 0; i < count; i++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) throw new Error("damaged ZIP directory");
+    const flags = buf.readUInt16LE(p + 8), method = buf.readUInt16LE(p + 10);
+    const csize = buf.readUInt32LE(p + 20), usize = buf.readUInt32LE(p + 24);
+    const nlen = buf.readUInt16LE(p + 28), elen = buf.readUInt16LE(p + 30), clen = buf.readUInt16LE(p + 32);
+    const local = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nlen).toString(flags & 0x800 ? "utf8" : "latin1");
+    p += 46 + nlen + elen + clen;
+    if (flags & 1) throw new Error("encrypted ZIP entries are not supported");
+    if (name.endsWith("/")) continue;
+    out.push({
+      name, size: usize,
+      read: async () => {
+        if (usize > maxEntryBytes) throw new Error("entry too large");
+        if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) throw new Error("damaged ZIP entry");
+        const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+        const data = buf.subarray(start, start + csize);
+        if (method === 0) return Buffer.from(data);
+        if (method !== 8) throw new Error("unsupported ZIP compression");
+        const { inflateRaw } = await import("node:zlib");
+        return await new Promise<Buffer>((resolve, reject) => inflateRaw(data, { maxOutputLength: maxEntryBytes }, (e, r) => (e ? reject(e) : resolve(r))));
+      },
+    });
+  }
+  return out;
+}

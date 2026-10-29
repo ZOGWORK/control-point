@@ -36,6 +36,11 @@ export interface ControlKitDeps {
   deleteStoredFile?: (url: string) => Promise<void>;
   /** The fetch behind AI review's model calls (controlKitAi.runReview); tests swap it. */
   reviewFetch?: typeof fetch;
+  /**
+   * A STEP zip stored for an import on a robot: the Prints library files its 3D-print STEPs under
+   * "Season / Robot / Control Kit" (server/prints.ts fileControlKitStepZip). Called after the answer, best effort.
+   */
+  fileStepZip?: (input: { teamId: number; robotId: number; zip: Buffer; sentBy: string | null }) => Promise<unknown>;
 }
 
 export const CONTROL_KIT_CLIENT_ID = "control-kit";
@@ -491,7 +496,13 @@ export function createControlKitLink(deps: ControlKitDeps) {
       ]);
       if (!swapped.changes) continue;
       if (replaced) await dropStored(replaced.url);
-      return res.json({ name, url, sizeBytes: buffer.length, sha256: want, duplicate: false });
+      res.json({ name, url, sizeBytes: buffer.length, sha256: want, duplicate: false });
+      // The STEP zip's prints go to the Prints library too, after the answer so a large zip never delays it.
+      if (mediaType === "application/zip" && row.robot_id && deps.fileStepZip) {
+        void deps.fileStepZip({ teamId, robotId: Number(row.robot_id), zip: buffer, sentBy: row.sent_by ?? null })
+          .catch((e) => console.error("Filing Control Kit prints failed:", e?.message || e));
+      }
+      return;
     }
     await dropStored(url);
     res.setHeader("Retry-After", "2");

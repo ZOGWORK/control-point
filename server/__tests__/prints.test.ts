@@ -16,7 +16,12 @@ import { writeFileSync } from "node:fs";
 import { startTestServer, seedTeam, seedMember, type TestServer } from "./helpers/testServer";
 import { withSession } from "./helpers/session";
 import { cleanName, splitPath, uniqueName, printKind, safeName, matchesFilters, groupLine, folderAndBelow, type PrintFile } from "../../src/types/prints";
-import { PrintStore, createPrints, controlKitPrintPath, printLimits } from "../prints";
+import { PrintStore, createPrints, controlKitPrintPath, printLimits, partForStepFile } from "../prints";
+import { createHash } from "node:crypto";
+import { seasonName } from "../../src/types/cadBom";
+
+const CK_SECRET = "test-control-kit-secret";
+const CK_REDIRECT = "http://127.0.0.1:8787/control-point/callback";
 import { crc32, writeZip, uniqueZipNames } from "../zipStream";
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -77,7 +82,7 @@ function unzip(buf: Buffer): Record<string, Buffer> {
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "cp-prints-store-"));
-  t = await startTestServer("cp-prints-", { PRINTS_DIR: dir, PRINTS_MAX_FILE_MB: "1", PRINTS_QUOTA_MB: "3", PRINTS_MIN_FREE_MB: "0" });
+  t = await startTestServer("cp-prints-", { PRINTS_DIR: dir, PRINTS_MAX_FILE_MB: "1", PRINTS_QUOTA_MB: "3", PRINTS_MIN_FREE_MB: "0", CONTROL_KIT_CLIENT_SECRET: CK_SECRET, CONTROL_KIT_REDIRECT_URIS: CK_REDIRECT });
   team = await seedTeam(t.db, "HORS");
   other = await seedTeam(t.db, "Other");
   const adminId = await seedMember(t.db, team, "Ada", "ada@test.local", "admin");
@@ -467,6 +472,73 @@ describe("filing a Control Kit print from inside the server", () => {
     await expect(prints.fileControlKitPrint({ teamId: other, robotId: robot, name: "x.step", bytes: Buffer.from("x") })).rejects.toThrow();
     const act = (await get(`/api/prints/activity?file=${first.fileId}`, admin)).body;
     expect(act.map((x: any) => x.action)).toEqual(expect.arrayContaining(["upload", "status", "replace"]));
+  });
+});
+
+describe("Control Kit's STEP zip", () => {
+  it("reads which CAD part a STEP file name points at", () => {
+    const ids = ["d:ps:JHD:default", "d:ps:JHE:default", "d:ps:K2:size=10 mm"];
+    expect(partForStepFile("Claw_finger__JHD.step", ids)).toBe("d:ps:JHD:default");
+    expect(partForStepFile("Claw_finger__JHD_2.step", ids)).toBe("d:ps:JHD:default");
+    let h = 0;
+    for (const ch of "size=10 mm") h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    expect(partForStepFile(`Spacer__K2__cfg${h.toString(36).slice(0, 5)}.step`, ids)).toBe("d:ps:K2:size=10 mm");
+    expect(partForStepFile("Spacer__K2.step", ids)).toBeNull();
+    expect(partForStepFile("loose.step", ids)).toBeNull();
+  });
+  it("files the 3D-print STEPs of a zip Control Kit uploads after a send under Season / Robot / Control Kit", async () => {
+    const r = await t.post("/api/integrations/control-kit/authorize", { state: "s", redirect_uri: CK_REDIRECT }, admin);
+    const code = new URL(r.body.redirect).searchParams.get("code")!;
+    const tok = await fetch(`${t.base}/api/integrations/control-kit/token`, { method: "POST", headers: { authorization: `Basic ${Buffer.from(`control-kit:${CK_SECRET}`).toString("base64")}`, "content-type": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", code, redirect_uri: CK_REDIRECT }) });
+    const token = (await tok.json()).access_token as string;
+    const ck = async (path: string, init: { body?: any; raw?: Buffer; headers?: Record<string, string> }) => {
+      const headers: Record<string, string> = { authorization: `Bearer ${token}`, ...init.headers };
+      if (init.body !== undefined) headers["content-type"] = "application/json";
+      const res = await fetch(`${t.base}/api/integrations/control-kit/workspaces/${team}${path}`, { method: "POST", headers, body: init.raw ?? JSON.stringify(init.body) });
+      return { status: res.status, body: await res.json().catch(() => null) };
+    };
+    const cad = (part: string, name: string) => ({ name, section: "Other", quantity: 3, source: "other", unit_cost: 0, status: "to_order", notes: "",
+      extra: { key: `line-${part}`, identity: `docZ:ps:${part}:default`, documentId: "docZ", elementId: "ps", partId: part, configuration: "default" } });
+    const sent = await ck("/bom", { body: {
+      idempotencyKey: "prints-zip-1", source: "control-kit", bundleVersion: 2,
+      assembly: { name: "Arm", documentId: "docZ", elementId: "asmZ", onshapeUrl: "https://cad.onshape.com/documents/docZ", assemblyUrl: "https://cad.onshape.com/documents/docZ/w/w1/e/asmZ", documentName: "Arm" },
+      revision: { type: "m", id: "m1" }, generatedAt: "2026-10-28T10:00:00.000Z", lines: [], suppressedLines: [], missingMetadataLines: [], suppressedCount: 0,
+      totals: { uniqueLines: 2, totalInstances: 6, totalCostUsd: null, outOfStockLines: 0 }, cadParts: [cad("JHD", "Claw finger"), cad("K2", "Arm plate")],
+      controlPointCadUrl: "https://tryctrlpoint.org/cad-parts",
+      files: [{ name: "Arm STEP.zip", mediaType: "application/zip", sizeBytes: 9, sha256: "ab".repeat(32), delivery: "reference", reason: "Uploaded after this bundle." }], filesNotIncluded: [],
+    } });
+    expect(sent.status).toBe(200);
+    const robotId = Number(((await t.db.execute({ sql: "SELECT robot_id FROM cad_imports WHERE id = ?", args: [sent.body.importId] })).rows[0] as any).robot_id);
+    const robot = (await t.db.execute({ sql: "SELECT name, season FROM cad_robots WHERE id = ?", args: [robotId] })).rows[0] as any;
+    // The zip as Control Kit builds it: process folders and a manifest.
+    const d = mkdtempSync(join(tmpdir(), "cp-ckzip-"));
+    const files: Record<string, string> = {
+      "Arm_STEP/3D_print/Claw_finger__JHD.step": "ISO-10303-21;\nclaw\nEND-ISO-10303-21;\n",
+      "Arm_STEP/CNC/Arm_plate__K2.step": "ISO-10303-21;\nplate\nEND-ISO-10303-21;\n",
+      "Arm_STEP/MANIFEST.txt": "Control Kit STEP export\n\nFile | Part | Qty | Process | Units | Onshape source\nClaw_finger__JHD.step | Claw finger | 3 | 3D print | mm | x\nArm_plate__K2.step | Arm plate | 3 | CNC | mm | x\n",
+    };
+    const entries = Object.entries(files).map(([name, text], i) => { const p = join(d, String(i)); writeFileSync(p, text); return { name, path: p, mtime: new Date() }; });
+    const out = new PassThrough();
+    const chunks: Buffer[] = [];
+    out.on("data", (c) => chunks.push(c));
+    await writeZip(out, entries);
+    const zip = Buffer.concat(chunks);
+    const up = await ck(`/imports/${sent.body.importId}/files?name=${encodeURIComponent("Arm STEP.zip")}`, { raw: zip, headers: { "content-type": "application/zip", "x-content-sha256": createHash("sha256").update(zip).digest("hex") } });
+    expect(up.status).toBe(200);
+    let hit: any = null;
+    for (let i = 0; i < 60 && !hit; i++) {
+      hit = (await lib()).files.find((f: any) => f.name === "Claw finger.step" && f.robotId === robotId);
+      if (!hit) await new Promise((res) => setTimeout(res, 250));
+    }
+    expect(hit).toMatchObject({ source: "control-kit", kind: "step", robotId, copiesNeeded: 3, copiesNeededFrom: "cad", cadPart: { name: "Claw finger" } });
+    const l = await lib();
+    const path: string[] = [];
+    for (let id = hit.folderId; id != null;) { const f = l.folders.find((x: any) => x.id === id); path.unshift(f.name); id = f.parentId; }
+    expect(path).toEqual([seasonName(Number(robot.season)), String(robot.name).replace(/\//g, "-"), "Control Kit"]);
+    // CNC parts are not prints.
+    expect(l.files.some((f: any) => f.name.startsWith("Arm plate"))).toBe(false);
+    expect((await raw(`/api/prints/files/${hit.id}/download`, admin)).bytes.toString()).toContain("claw");
   });
 });
 

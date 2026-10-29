@@ -2412,6 +2412,8 @@ async function startServer() {
     // Declared further down; only called per request, after startup.
     storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
     deleteStoredFile: (url) => deleteStoredFileByUrl(url),
+    // Its STEP zip's 3D-print files are filed in the Prints library (server/prints.ts).
+    fileStepZip: (o) => prints.fileControlKitStepZip(o),
     appUrl: (req) => (process.env.APP_URL || "").replace(/\/$/, "") || getBaseUrl(req),
   });
   controlKit.registerBearerRoutes(app);

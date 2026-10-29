@@ -31,7 +31,7 @@ import {
   canPreview, cleanMaterial, cleanName, cleanSubsystem, isPrintStatus, printKind, safeName, uniqueName,
   type PrintFile, type PrintKind, type PrintStatus,
 } from "../src/types/prints.js";
-import { writeZip, uniqueZipNames, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES } from "./zipStream.js";
+import { readZip, writeZip, uniqueZipNames, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipReadEntry } from "./zipStream.js";
 
 type Auth = { memberId: number; teamId: number | null };
 type Stmt = { sql: string; args: any[] };
@@ -932,7 +932,10 @@ export function createPrints(deps: PrintDeps) {
     const by = { id: input.by?.memberId ?? null, name: input.by?.name || (source === "control-kit" ? "Control Kit" : "Control Point") };
     const folderId = await ensureFolders(input.teamId, segments, by);
     const sha = createHash("sha256").update(bytes).digest("hex");
-    const existing = await dbGet("SELECT * FROM print_files WHERE team_id = ? AND COALESCE(folder_id, 0) = ? AND name = ? COLLATE NOCASE", input.teamId, folderId, name);
+    // Control Kit's earlier file for the same part (by its identity, else by name) is the one a new send replaces.
+    const existing = (source === "control-kit" && input.ckPartKey
+      ? await dbGet("SELECT * FROM print_files WHERE team_id = ? AND COALESCE(folder_id, 0) = ? AND source = 'control-kit' AND ck_part_key = ? ORDER BY id LIMIT 1", input.teamId, folderId, input.ckPartKey)
+      : null) ?? await dbGet("SELECT * FROM print_files WHERE team_id = ? AND COALESCE(folder_id, 0) = ? AND name = ? COLLATE NOCASE", input.teamId, folderId, name);
     if (existing && existing.source === source && source === "control-kit" && (!input.ckPartKey || !existing.ck_part_key || existing.ck_part_key === input.ckPartKey)) {
       if (existing.sha256 === sha) return { fileId: Number(existing.id), folderId, name: existing.name, replaced: false, unchanged: true };
       const key = store.newKey(input.teamId);
@@ -986,12 +989,69 @@ export function createPrints(deps: PrintDeps) {
     });
   }
 
+  /**
+   * Control Kit's STEP zip for a send (uploaded after the send, contract v1.2 §6): every STEP in its "3D_print" folder is
+   * filed for the robot under "Season / Robot / Control Kit", named after its part (MANIFEST.txt) and linked to the
+   * robot's CAD part whose identity the file name carries ("<name>__<partId>[__cfg<hash>].step"). Files of other
+   * processes (CNC, 2D cut, fabricate) are not prints and stay only in the zip. Never throws: it reports what it did.
+   */
+  async function fileControlKitStepZip(input: { teamId: number; robotId: number; zip: Buffer; sentBy?: string | null }) {
+    const report = { filed: 0, replaced: 0, unchanged: 0, skipped: [] as { file: string; reason: string }[] };
+    let entries: ZipReadEntry[];
+    try { entries = readZip(input.zip, limits.maxFile); } catch (e: any) { report.skipped.push({ file: "(zip)", reason: e?.message || "unreadable" }); return report; }
+    const manifest = entries.find((e) => /(^|\/)MANIFEST\.txt$/.test(e.name));
+    const partNames = new Map<string, string>();
+    if (manifest && manifest.size < 4 * MB) {
+      for (const line of (await manifest.read().catch(() => Buffer.alloc(0))).toString("utf8").split(/\r?\n/)) {
+        const cols = line.split(" | ");
+        if (cols.length >= 2 && /\.(step|stp)$/i.test(cols[0].trim())) partNames.set(cols[0].trim().toLowerCase(), cols[1].trim());
+      }
+    }
+    const parts = await dbAll("SELECT ck_part_key FROM cad_parts WHERE team_id = ? AND robot_id = ? AND ck_part_key IS NOT NULL AND ck_removed_at IS NULL", input.teamId, input.robotId);
+    for (const e of entries.filter((x) => /(^|\/)3D_print\/[^/]+\.(step|stp)$/i.test(x.name))) {
+      const file = e.name.split("/").pop()!;
+      try {
+        const bytes = await e.read();
+        const ckPartKey = partForStepFile(file, parts.map((p) => String(p.ck_part_key)));
+        const part = partNames.get(file.toLowerCase());
+        const r = await fileControlKitPrint({ teamId: input.teamId, robotId: input.robotId, name: `${safeName(part ?? file.replace(/\.(step|stp)$/i, ""), "part")}.step`, bytes, ckPartKey, sentBy: input.sentBy });
+        if (r.unchanged) report.unchanged++; else if (r.replaced) report.replaced++; else report.filed++;
+      } catch (err: any) {
+        report.skipped.push({ file, reason: err?.message || "failed" });
+        // No room: the rest won't fit either.
+        if (err instanceof PrintError && (err.code === "quota" || err.code === "disk_full")) break;
+      }
+    }
+    return report;
+  }
+
   /** The bytes behind deleted rows (a deleted workspace). */
   async function removeStored(rows: { storage_key?: string | null; thumb_key?: string | null }[]) {
     for (const r of rows) { await store.remove(r.storage_key); await store.remove(r.thumb_key); }
   }
 
-  return { registerRoutes, filePrint, fileControlKitPrint, removeStored, limits, store };
+  return { registerRoutes, filePrint, fileControlKitPrint, fileControlKitStepZip, removeStored, limits, store };
+}
+
+/**
+ * The CAD part identity a Control Kit STEP file name points at, among a robot's identities
+ * ("documentId:elementId:partId:configuration"), or null when none or several fit. The name is Control Kit's
+ * stepFileName: "<name>__<partId, letters and digits, 10 at most>[__cfg<5 base-36 of the configuration's hash>][_n].step".
+ */
+export function partForStepFile(file: string, identities: string[]): string | null {
+  const m = /__([A-Za-z0-9]{1,10})(?:__cfg([0-9a-z]{1,5}))?(?:_\d+)?\.(?:step|stp)$/i.exec(file);
+  if (!m) return null;
+  const cfgTag = (c: string) => {
+    if (!c || c === "default") return "";
+    let h = 0;
+    for (const ch of c) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h.toString(36).slice(0, 5);
+  };
+  const hits = identities.filter((id) => {
+    const [, , partId = "", ...cfg] = id.split(":");
+    return partId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 10) === m[1] && cfgTag(cfg.join(":")) === (m[2] ?? "");
+  });
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /** Where Control Kit's prints for a robot are filed: "2025–26 DECODE / Competition robot / Control Kit". */
