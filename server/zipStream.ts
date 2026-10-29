@@ -9,6 +9,8 @@ import type { Writable } from "node:stream";
 
 /** Classic ZIP offsets are 32-bit; stay well under 4 GiB (deflate can grow incompressible data slightly). */
 export const ZIP_MAX_BYTES = 3.5 * 1024 ** 3;
+/** Classic ZIP counts entries in 16 bits. */
+export const ZIP_MAX_ENTRIES = 65_535;
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -44,6 +46,7 @@ export interface ZipEntry {
 
 /** Write a ZIP of `entries` to `out`, honouring backpressure. Rejects if `out` closes early or a file can't be read. */
 export async function writeZip(out: Writable, entries: ZipEntry[]): Promise<void> {
+  if (entries.length > ZIP_MAX_ENTRIES) throw new Error("too many entries for a classic ZIP");
   let offset = 0;
   const write = (buf: Buffer) => new Promise<void>((resolve, reject) => {
     if (out.destroyed || (out as any).writableEnded) return reject(new Error("closed"));

@@ -312,6 +312,50 @@ describe("folders, moves and renames", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("moves a file onto a same-named one as '(2)' with the bulk move the page uses", async () => {
+    const f = await t.post("/api/prints/folders", { name: "Drop target" }, admin);
+    await uploadFile(admin, { name: "a.stl", folderId: f.body.id });
+    const outside = await uploadFile(admin, { name: "a.stl" });
+    const r = await t.post("/api/prints/files/bulk", { ids: [outside.body.id], action: "move", folderId: f.body.id }, admin);
+    expect(r.status).toBe(200);
+    expect(r.body.files).toBe(1);
+    const names = (await lib()).files.filter((x: any) => x.folderId === f.body.id).map((x: any) => x.name).sort();
+    expect(names).toEqual(["a (2).stl", "a.stl"]);
+    // Moves, uploads and new folders into a folder that is gone are refused.
+    await del(`/api/prints/folders/${f.body.id}?files=2`, admin);
+    const loose = await uploadFile(admin, { name: "loose.stl" });
+    expect((await t.post("/api/prints/files/bulk", { ids: [loose.body.id], action: "move", folderId: f.body.id }, admin)).status).toBe(404);
+    expect((await t.patch(`/api/prints/files/${loose.body.id}`, { folderId: f.body.id }, admin)).status).toBe(404);
+    expect((await uploadFile(admin, { name: "late.stl", folderId: f.body.id })).status).toBe(404);
+    expect((await t.post("/api/prints/folders", { name: "Child", parentId: f.body.id }, admin)).status).toBe(404);
+    await del(`/api/prints/files/${loose.body.id}`, admin);
+  });
+  it("fills the copies printed when one file is marked printed", async () => {
+    const f = await uploadFile(admin, { name: "four.stl" });
+    await t.patch(`/api/prints/files/${f.body.id}`, { copiesNeeded: 4, copiesPrinted: 1 }, admin);
+    const r = await t.patch(`/api/prints/files/${f.body.id}`, { status: "printed" }, admin);
+    expect(r.body).toMatchObject({ status: "printed", copiesPrinted: 4 });
+    await del(`/api/prints/files/${f.body.id}`, admin);
+  });
+  it("refuses a write meant for another workspace (a request sent before a workspace switch)", async () => {
+    const r = await t.api("/api/prints/folders", { method: "POST", body: JSON.stringify({ name: "Stale" }), session: admin, headers: { "x-cp-prints-team": String(other) } });
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("workspace_changed");
+    const ok = await t.api("/api/prints/folders", { method: "POST", body: JSON.stringify({ name: "Fresh" }), session: admin, headers: { "x-cp-prints-team": String(team) } });
+    expect(ok.status).toBe(200);
+    expect((await lib()).teamId).toBe(team);
+    await del(`/api/prints/folders/${ok.body.id}`, admin);
+  });
+  it("counts thumbnails in the quota", async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(100_000)]);
+    const before = (await lib()).usage.used;
+    const f = await uploadFile(admin, { name: "thumbed.stl", thumb: png });
+    expect((await lib()).usage.used - before).toBe(stl().length + png.length);
+    await del(`/api/prints/files/${f.body.id}`, admin);
+  });
+});
+
 describe("groups, details and downloads", () => {
   it("files one print in several collections without copying it, and marks a selection printed", async () => {
     const a = await uploadFile(admin, { name: "hub.stl" });

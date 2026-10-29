@@ -31,7 +31,7 @@ import {
   canPreview, cleanMaterial, cleanName, cleanSubsystem, isPrintStatus, printKind, safeName, uniqueName,
   type PrintFile, type PrintKind, type PrintStatus,
 } from "../src/types/prints.js";
-import { writeZip, uniqueZipNames, ZIP_MAX_BYTES } from "./zipStream.js";
+import { writeZip, uniqueZipNames, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES } from "./zipStream.js";
 
 type Auth = { memberId: number; teamId: number | null };
 type Stmt = { sql: string; args: any[] };
@@ -164,6 +164,9 @@ export function createPrints(deps: PrintDeps) {
     if (!auth) return null;
     const teamId = teamOf(auth, res);
     if (!teamId) return null;
+    // The page names the workspace it shows; a request sent after a workspace switch (a queued upload) stops here.
+    const sentFor = req.headers?.["x-cp-prints-team"];
+    if (sentFor !== undefined && Number(sentFor) !== teamId) { res.status(409).json({ error: "You switched workspaces. Reopen Prints to keep going.", code: "workspace_changed" }); return null; }
     if (edit && !(await deps.hasPerm(auth, MANAGE_PRINTS))) { res.status(403).json({ error: "Your role can view and download prints, not change them" }); return null; }
     return { auth, teamId };
   }
@@ -172,7 +175,7 @@ export function createPrints(deps: PrintDeps) {
     sql: "INSERT INTO print_activity (team_id, file_id, folder_id, member_id, member_name, action, detail, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     args: [teamId, o.fileId ?? null, o.folderId ?? null, by.id, by.name, action, JSON.stringify(o.detail ?? {}), now()],
   });
-  const usedBytes = async (teamId: number) => Number((await dbGet("SELECT COALESCE(SUM(size), 0) AS n FROM print_files WHERE team_id = ?", teamId))?.n) || 0;
+  const usedBytes = async (teamId: number) => Number((await dbGet("SELECT COALESCE(SUM(size + thumb_size), 0) AS n FROM print_files WHERE team_id = ?", teamId))?.n) || 0;
   async function teamFolder(teamId: number, raw: unknown): Promise<number | null | undefined> {
     if (raw === null || raw === undefined || raw === "" || raw === "root") return null;
     const id = Number(raw);
@@ -183,11 +186,20 @@ export function createPrints(deps: PrintDeps) {
     const rows = await dbAll("SELECT name FROM print_files WHERE team_id = ? AND COALESCE(folder_id, 0) = ? AND id <> ?", teamId, folderId ?? 0, exceptFile ?? 0);
     return new Set(rows.map((r) => String(r.name).toLowerCase()));
   }
+  /** SQL for `?` (a folder id) and every folder below it in team `?`; args: [id, teamId, teamId]. Usable inside any statement. */
+  const SUBTREE = `WITH RECURSIVE sub(id) AS (SELECT id FROM print_folders WHERE id = ? AND team_id = ?
+         UNION SELECT f.id FROM print_folders f JOIN sub ON f.parent_id = sub.id WHERE f.team_id = ?) SELECT id FROM sub`;
+  /** True in SQL when folder `?` is the root (NULL) or a folder of team `?`; args: [folderId, folderId, teamId]. */
+  const FOLDER_OK = "(? IS NULL OR EXISTS (SELECT 1 FROM print_folders d WHERE d.id = ? AND d.team_id = ?))";
+  /**
+   * A statement that fails the whole write batch when `condition` (SQL) is false: json() of malformed text raises an
+   * error, so a check made inside the transaction can stop it. isAssert() recognises the failure.
+   */
+  const assertStmt = (condition: string, args: any[]): Stmt => ({ sql: `SELECT CASE WHEN ${condition} THEN 1 ELSE json('prints-changed') END`, args });
+  const isAssert = (e: any) => /malformed JSON/i.test(String(e?.message || e));
   /** `id` and every folder below it, in this team. */
   async function subtree(teamId: number, id: number): Promise<number[]> {
-    const rows = await dbAll(
-      `WITH RECURSIVE sub(id) AS (SELECT id FROM print_folders WHERE id = ? AND team_id = ?
-         UNION SELECT f.id FROM print_folders f JOIN sub ON f.parent_id = sub.id WHERE f.team_id = ?) SELECT id FROM sub`, id, teamId, teamId);
+    const rows = await dbAll(SUBTREE, id, teamId, teamId);
     return rows.map((r) => Number(r.id));
   }
   async function folderTrailNames(teamId: number): Promise<Map<number, { parent: number | null; name: string }>> {
@@ -244,10 +256,13 @@ export function createPrints(deps: PrintDeps) {
         const r = await dbRun(
           `INSERT INTO print_files (team_id, folder_id, name, kind, size, sha256, storage_key, robot_id, cad_part_id, ck_part_key, source, uploaded_by, uploaded_by_name, created_at, updated_at)
            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-            WHERE (SELECT COALESCE(SUM(size), 0) FROM print_files WHERE team_id = ?) + ? <= ?`,
+            WHERE (SELECT COALESCE(SUM(size + thumb_size), 0) FROM print_files WHERE team_id = ?) + ? <= ? AND ${FOLDER_OK}`,
           teamId, row.folderId, name, row.kind, row.size, row.sha, row.key, row.robotId ?? null, row.cadPartId ?? null, row.ckPartKey ?? null, row.source, row.by.id, row.by.name, t, t,
-          teamId, row.size, limits.quota);
-        if (!r.changes) throw new PrintError("quota", quotaMessage(), 413);
+          teamId, row.size, limits.quota, row.folderId, row.folderId, teamId);
+        if (!r.changes) {
+          if (row.folderId != null && !(await dbGet("SELECT 1 FROM print_folders WHERE id = ? AND team_id = ?", row.folderId, teamId))) throw new PrintError("bad_name", "That folder no longer exists", 404);
+          throw new PrintError("quota", quotaMessage(), 413);
+        }
         return { id: Number(r.lastInsertRowid), name };
       } catch (e) {
         if (!isUnique(e) || attempt === 4) throw e;
@@ -263,10 +278,18 @@ export function createPrints(deps: PrintDeps) {
   }
   async function saveThumb(teamId: number, fileId: number, key: string, bytes: Buffer, by: { id: number | null; name: string } | null) {
     if (bytes.length > THUMB_MAX || !bytes.subarray(0, 8).equals(PNG_SIG)) throw new PrintError("unsupported", "Thumbnails are PNG images up to 512 KB");
+    await checkDisk(bytes.length);
     const thumbKey = `${key}.thumb.png`;
     await store.write(thumbKey, bytes);
-    const r = await dbRun("UPDATE print_files SET thumb_key = ? WHERE id = ? AND team_id = ? AND storage_key = ?", thumbKey, fileId, teamId, key);
-    if (!r.changes) await store.remove(thumbKey);
+    // Counted in the quota like the file itself (replacing any earlier thumbnail's size).
+    const r = await dbRun(
+      `UPDATE print_files SET thumb_key = ?, thumb_size = ? WHERE id = ? AND team_id = ? AND storage_key = ?
+         AND (SELECT COALESCE(SUM(size + thumb_size), 0) FROM print_files WHERE team_id = ?) - thumb_size + ? <= ?`,
+      thumbKey, bytes.length, fileId, teamId, key, teamId, bytes.length, limits.quota);
+    if (!r.changes) {
+      await store.remove(thumbKey);
+      if (await dbGet("SELECT 1 FROM print_files WHERE id = ? AND team_id = ? AND storage_key = ?", fileId, teamId, key)) throw new PrintError("quota", quotaMessage(), 413);
+    }
     void by;
   }
   const sendError = (res: any, e: any, what: string) => {
@@ -295,8 +318,9 @@ export function createPrints(deps: PrintDeps) {
         try { if (team?.subsystems) subsystems = cleanSubsystems(JSON.parse(team.subsystems)); } catch { /* defaults */ }
         res.setHeader("Cache-Control", "private, no-store");
         res.json({
+          teamId,
           canEdit: await deps.hasPerm(a.auth, MANAGE_PRINTS),
-          usage: { used: files.reduce((s, f) => s + (Number(f.size) || 0), 0), quota: limits.quota, maxFile: limits.maxFile },
+          usage: { used: files.reduce((s, f) => s + (Number(f.size) || 0) + (Number(f.thumb_size) || 0), 0), quota: limits.quota, maxFile: limits.maxFile },
           folders: folders.map((f) => ({ id: Number(f.id), parentId: f.parent_id == null ? null : Number(f.parent_id), name: f.name, createdAt: f.created_at, updatedAt: f.updated_at })),
           files: files.map((f) => fileView(f, byFile)),
           collections: collections.map((c) => ({ id: Number(c.id), name: c.name, files: Number(c.n) || 0 })),
@@ -319,7 +343,9 @@ export function createPrints(deps: PrintDeps) {
         const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
         const t = now();
         try {
-          const r = await dbRun("INSERT INTO print_folders (team_id, parent_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", a.teamId, parentId, name, by.id, t, t);
+          const r = await dbRun(`INSERT INTO print_folders (team_id, parent_id, name, created_by, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ? WHERE ${FOLDER_OK}`,
+            a.teamId, parentId, name, by.id, t, t, parentId, parentId, a.teamId);
+          if (!r.changes) return res.status(404).json({ error: "That folder no longer exists" });
           const id = Number(r.lastInsertRowid);
           const log = logStmt(a.teamId, by, "folder_create", { folderId: id, detail: { name, parentId } });
           await dbRun(log.sql, ...log.args);
@@ -356,16 +382,21 @@ export function createPrints(deps: PrintDeps) {
         const renamed = name !== folder.name;
         if (!moved && !renamed) return res.json({ id: Number(folder.id), name });
         const stmts: Stmt[] = [
-          // The parent is checked again inside the update: a move into a folder deleted meanwhile changes nothing.
-          { sql: `UPDATE print_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ? AND team_id = ?
-                    AND (? IS NULL OR EXISTS (SELECT 1 FROM print_folders p WHERE p.id = ? AND p.team_id = ?))`,
-            args: [name, parentId, now(), folder.id, a.teamId, parentId, parentId, a.teamId] },
+          // Checked again inside the update: a move into a folder deleted meanwhile, or into one that another move just
+          // put inside this folder, changes nothing.
+          { sql: `UPDATE print_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ? AND team_id = ? AND ${FOLDER_OK}
+                    AND (? IS NULL OR ? NOT IN (${SUBTREE}))`,
+            args: [name, parentId, now(), folder.id, a.teamId, parentId, parentId, a.teamId, parentId, parentId, folder.id, a.teamId, a.teamId] },
         ];
         if (renamed) stmts.push(logStmt(a.teamId, by, "folder_rename", { folderId: Number(folder.id), detail: { from: folder.name, to: name } }));
         if (moved) stmts.push(logStmt(a.teamId, by, "folder_move", { folderId: Number(folder.id), detail: { from: folder.parent_id ?? null, to: parentId } }));
         try {
           const [r] = await deps.dbBatchResults(stmts);
-          if (!r.changes) return res.status(404).json({ error: "That folder no longer exists" });
+          if (!r.changes) {
+            const p = parentId == null ? null : await teamFolder(a.teamId, parentId);
+            if (p !== undefined && (await dbGet("SELECT 1 FROM print_folders WHERE id = ? AND team_id = ?", folder.id, a.teamId))) return res.status(400).json({ error: "A folder can't go inside itself" });
+            return res.status(404).json({ error: "That folder no longer exists" });
+          }
         } catch (e) {
           if (isUnique(e)) return res.status(409).json({ error: `There's already a folder named "${name}" there` });
           throw e;
@@ -389,14 +420,26 @@ export function createPrints(deps: PrintDeps) {
         }
         const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
         const folder = await dbGet("SELECT name FROM print_folders WHERE id = ?", tree[0]);
-        const inTree = `IN (${qs(tree.length)})`;
+        // Every statement works on the subtree as it is inside this transaction, and the first one stops the batch when
+        // the folder now holds a different number of files than the person confirmed (an upload or move meanwhile).
+        const inTree = `IN (${SUBTREE})`;
+        const t3 = [tree[0], a.teamId, a.teamId];
         const stmts: Stmt[] = [
-          { sql: `DELETE FROM print_collection_files WHERE team_id = ? AND file_id IN (SELECT id FROM print_files WHERE team_id = ? AND folder_id ${inTree})`, args: [a.teamId, a.teamId, ...tree] },
-          { sql: `DELETE FROM print_files WHERE team_id = ? AND folder_id ${inTree} RETURNING id, name, storage_key, thumb_key`, args: [a.teamId, ...tree] },
-          { sql: `DELETE FROM print_folders WHERE team_id = ? AND id ${inTree}`, args: [a.teamId, ...tree] },
+          assertStmt(`(SELECT COUNT(*) FROM print_files WHERE team_id = ? AND folder_id ${inTree}) = ?`, [a.teamId, ...t3, files]),
+          { sql: `DELETE FROM print_collection_files WHERE team_id = ? AND file_id IN (SELECT id FROM print_files WHERE team_id = ? AND folder_id ${inTree})`, args: [a.teamId, a.teamId, ...t3] },
+          { sql: `DELETE FROM print_files WHERE team_id = ? AND folder_id ${inTree} RETURNING id, name, storage_key, thumb_key`, args: [a.teamId, ...t3] },
+          { sql: `DELETE FROM print_folders WHERE team_id = ? AND id ${inTree}`, args: [a.teamId, ...t3] },
           logStmt(a.teamId, by, "folder_delete", { folderId: tree[0], detail: { name: folder?.name, files, folders: tree.length } }),
         ];
-        const out = await deps.dbBatchResults(stmts);
+        let out;
+        try { out = await deps.dbBatchResults(stmts); }
+        catch (e) {
+          if (!isAssert(e)) throw e;
+          const now2 = await subtree(a.teamId, tree[0]);
+          const n = now2.length ? Number((await dbGet(`SELECT COUNT(*) AS n FROM print_files WHERE team_id = ? AND folder_id IN (${qs(now2.length)})`, a.teamId, ...now2))?.n) || 0 : 0;
+          return res.status(409).json({ error: `This folder now holds ${n} file${n === 1 ? "" : "s"}. Confirm again to delete them too.`, files: n, folders: Math.max(0, now2.length - 1) });
+        }
+        out = out.slice(1);
         for (const r of out[1].rows) { await store.remove(r.storage_key); await store.remove(r.thumb_key); }
         res.json({ success: true, files: out[1].rows.length });
       } catch (e) { sendError(res, e, "folder delete"); }
@@ -533,13 +576,20 @@ export function createPrints(deps: PrintDeps) {
           }
         }
         set("status", status);
+        if (status === "printed" && row.status !== "printed" && body.copiesPrinted === undefined) {
+          const need = body.copiesNeeded !== undefined ? intOrNull(body.copiesNeeded, 999) : row.copies_needed != null ? Number(row.copies_needed)
+            : row.cad_part_id ? Number((await dbGet("SELECT quantity FROM cad_parts WHERE id = ? AND team_id = ?", row.cad_part_id, a.teamId))?.quantity ?? NaN) : NaN;
+          if (need != null && Number.isFinite(need) && need > Number(row.copies_printed)) set("copies_printed", need, "copiesPrinted");
+        }
         if (!sets.length) return res.json(await oneFile(a.teamId, Number(row.id)));
         const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
-        const stmts: Stmt[] = [{ sql: `UPDATE print_files SET ${sets.join(", ")}, updated_at = ? WHERE id = ? AND team_id = ?`, args: [...args, now(), row.id, a.teamId] }];
+        const stmts: Stmt[] = [{ sql: `UPDATE print_files SET ${sets.join(", ")}, updated_at = ? WHERE id = ? AND team_id = ? AND ${FOLDER_OK}`, args: [...args, now(), row.id, a.teamId, folderId, folderId, a.teamId] }];
         const action = changes.folderId !== undefined ? "move" : changes.name !== undefined ? "rename" : changes.status !== undefined && Object.keys(changes).length === 1 ? "status" : "edit";
         stmts.push(logStmt(a.teamId, by, action, { fileId: Number(row.id), folderId, detail: { ...changes, ...(changes.name !== undefined ? { from: row.name } : {}) } }));
-        try { await deps.dbBatchResults(stmts); }
-        catch (e) {
+        try {
+          const [u] = await deps.dbBatchResults(stmts);
+          if (!u.changes) return res.status(404).json({ error: "That folder no longer exists" });
+        } catch (e) {
           if (isUnique(e)) return res.status(409).json({ error: `There's already a file named "${changes.name ?? row.name}" there` });
           throw e;
         }
@@ -588,11 +638,10 @@ export function createPrints(deps: PrintDeps) {
           case "move": {
             const folderId = await teamFolder(a.teamId, body.folderId);
             if (folderId === undefined) return res.status(404).json({ error: "That folder no longer exists" });
+            // The destination's names stay taken; each moving file keeps its name, or takes the next "(n)".
             const taken = await namesIn(a.teamId, folderId);
             const moving = rows.filter((r) => (r.folder_id == null ? null : Number(r.folder_id)) !== folderId);
-            for (const r of moving) taken.delete(String(r.name).toLowerCase());
-            // Names already in the target stay; each moving file takes its name, or the next "(n)".
-            for (const r of rows.filter((x) => !moving.includes(x))) taken.add(String(r.name).toLowerCase());
+            stmts.push(assertStmt(FOLDER_OK, [folderId, folderId, a.teamId]));
             for (const r of moving) {
               const name = uniqueName(r.name, taken);
               taken.add(name.toLowerCase());
@@ -641,14 +690,16 @@ export function createPrints(deps: PrintDeps) {
           default:
             return res.status(400).json({ error: "Unknown action" });
         }
-        if (stmts.length) {
+        const changed = stmts.filter((x) => x.sql.startsWith("INSERT INTO print_activity")).length;
+        if (changed) {
           try { await deps.dbBatchResults(stmts); }
           catch (e) {
+            if (isAssert(e)) return res.status(404).json({ error: "That folder no longer exists" });
             if (isUnique(e)) return res.status(409).json({ error: "A file with one of those names just appeared there. Try again." });
             throw e;
           }
         }
-        res.json({ success: true, files: stmts.length / 2 });
+        res.json({ success: true, files: changed });
       } catch (e) { sendError(res, e, "bulk"); }
     });
 
@@ -732,6 +783,7 @@ export function createPrints(deps: PrintDeps) {
           if (typeof req.query.name === "string" && req.query.name.trim()) zipName = safeName(req.query.name, "Prints");
         }
         if (!rows.length) return res.status(404).json({ error: "There are no files to download here" });
+        if (rows.length > ZIP_MAX_ENTRIES) return res.status(413).json({ error: `One download holds at most ${ZIP_MAX_ENTRIES.toLocaleString("en-US")} files. Download smaller folders.` });
         const total = rows.reduce((s, r) => s + (Number(r.size) || 0), 0);
         if (total > ZIP_MAX_BYTES) return res.status(413).json({ error: "That's too much for one download. Download smaller folders." });
         const present: any[] = [];
@@ -836,9 +888,11 @@ export function createPrints(deps: PrintDeps) {
       let hit = await find();
       if (!hit) {
         const t = now();
-        const r = await dbRun("INSERT OR IGNORE INTO print_folders (team_id, parent_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)", teamId, parent, name, by.id, t, t);
+        const r = await dbRun(`INSERT OR IGNORE INTO print_folders (team_id, parent_id, name, created_by, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ? WHERE ${FOLDER_OK}`,
+          teamId, parent, name, by.id, t, t, parent, parent, teamId);
         if (r.changes) { const l = logStmt(teamId, by, "folder_create", { folderId: Number(r.lastInsertRowid), detail: { name, parentId: parent } }); await dbRun(l.sql, ...l.args); }
         hit = await find();
+        if (!hit) throw new PrintError("bad_name", "A folder on that path was deleted meanwhile; send again", 409);
       }
       parent = Number(hit.id);
     }
@@ -877,13 +931,13 @@ export function createPrints(deps: PrintDeps) {
       const key = store.newKey(input.teamId);
       await store.write(key, bytes);
       const r = await dbRun(
-        `UPDATE print_files SET size = ?, sha256 = ?, storage_key = ?, thumb_key = NULL, updated_at = ?,
+        `UPDATE print_files SET size = ?, sha256 = ?, storage_key = ?, thumb_key = NULL, thumb_size = 0, updated_at = ?,
                 status = CASE WHEN status = 'printed' THEN 'to_print' ELSE status END,
                 robot_id = COALESCE(?, robot_id), cad_part_id = COALESCE(?, cad_part_id), ck_part_key = COALESCE(?, ck_part_key)
           WHERE id = ? AND team_id = ? AND storage_key = ?
-            AND (SELECT COALESCE(SUM(size), 0) FROM print_files WHERE team_id = ?) - ? + ? <= ?`,
+            AND (SELECT COALESCE(SUM(size + thumb_size), 0) FROM print_files WHERE team_id = ?) - size - thumb_size + ? <= ?`,
         bytes.length, sha, key, now(), input.robotId ?? null, input.cadPartId ?? null, input.ckPartKey ?? null,
-        existing.id, input.teamId, existing.storage_key, input.teamId, Number(existing.size) || 0, bytes.length, limits.quota);
+        existing.id, input.teamId, existing.storage_key, input.teamId, bytes.length, limits.quota);
       if (!r.changes) {
         await store.remove(key);
         const still = await dbGet("SELECT id FROM print_files WHERE id = ?", existing.id);

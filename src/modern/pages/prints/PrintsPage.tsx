@@ -143,7 +143,7 @@ export function PrintsPage() {
   useEffect(() => { setSelected((s) => { const ids = new Set(shown.files.map((f) => f.id)); const n = new Set([...s].filter((x) => ids.has(x))); return n.size === s.size ? s : n; }); }, [shown.files]);
   const selectedFiles = shown.files.filter((f) => selected.has(f.id));
 
-  const fail = (e: any, fallback = "That didn't work.") => notify(e?.message || fallback, 'error');
+  const fail = (e: any, fallback = "That didn't work.") => { notify(e?.message || fallback, 'error'); if (e?.body?.code === 'workspace_changed') { go({}); void prints.reload(); } };
   const say = (msg: string) => { notify(msg, 'success'); setAnnounce(msg); };
 
   // ---- Actions -------------------------------------------------------------
@@ -300,6 +300,11 @@ export function PrintsPage() {
     if (e.key === 'Delete' || (e.key === 'Backspace' && (e.metaKey || e.ctrlKey))) { e.preventDefault(); void deleteFiles(selected.size && selected.has(f.id) ? [...selected] : [f.id]); }
     if (e.key === 'F2') { e.preventDefault(); renameFile(f); }
   };
+  const onFolderKey = (f: PrintFolder) => (e: KeyboardEvent) => {
+    if (!canEdit) return;
+    if (e.key === 'F2') { e.preventDefault(); renameFolder(f); }
+    if (e.key === 'Delete') { e.preventDefault(); void deleteFolder(f); }
+  };
   const onListKey = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && (e.target as HTMLElement).tagName !== 'INPUT') {
       e.preventDefault();
@@ -376,7 +381,7 @@ export function PrintsPage() {
         description="Every 3D print file in one library: folders for where a file lives, groups for how you think about it. One file can sit in many groups without a copy."
         actions={canEdit ? (
           <>
-            <Button variant="outline" onClick={newFolder} disabled={groupMode} className="max-sm:hidden"><FolderPlus /> New folder</Button>
+            <Button variant="outline" onClick={newFolder} disabled={groupMode}><FolderPlus /> New folder</Button>
             <Button onClick={() => fileInput.current?.click()}><Upload /> Upload</Button>
           </>
         ) : undefined} />
@@ -518,8 +523,7 @@ export function PrintsPage() {
                     className={cn('flex items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0 hover:bg-muted/40', over === `folder:${f.id}` && 'bg-accent/10 ring-2 ring-inset ring-accent')}>
                     <span className="hidden w-4 md:block" aria-hidden />
                     <FolderArt className="size-9 shrink-0 p-1.5" />
-                    <button type="button" onClick={() => openFolder(f.id)} data-row-main="1"
-                      onKeyDown={(e) => { if (!canEdit) return; if (e.key === 'F2') { e.preventDefault(); renameFolder(f); } if (e.key === 'Delete') { e.preventDefault(); void deleteFolder(f); } }}
+                    <button type="button" onClick={() => openFolder(f.id)} data-row-main="1" onKeyDown={onFolderKey(f)}
                       className="min-h-11 min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                       <span className="block truncate text-sm font-medium">{f.name}</span>
                       <span className="block text-xs text-muted-foreground">{groupMode ? `Folder in ${folderTrail(lib.folders, f.parentId).map((x) => x.name).join(' / ') || 'Top level'}` : `Folder · ${plural(folderCount(f), 'file')}`}</span>
@@ -557,7 +561,7 @@ export function PrintsPage() {
               {shown.folders.map((f) => (
                 <li key={`d${f.id}`} draggable={canEdit} onDragStart={dragFolder(f)} {...drop.target(`folder:${f.id}`, { folders: true, os: true })}
                   className={cn('group relative flex flex-col rounded-xl border border-border bg-card p-3 transition-colors hover:border-accent/40', over === `folder:${f.id}` && 'border-accent ring-2 ring-accent')}>
-                  <button type="button" onClick={() => openFolder(f.id)} className="flex flex-col items-start gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                  <button type="button" onClick={() => openFolder(f.id)} onKeyDown={onFolderKey(f)} className="flex flex-col items-start gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                     <FolderArt className="size-10" />
                     <span className="line-clamp-2 break-words text-sm font-medium">{f.name}</span>
                     <span className="text-xs text-muted-foreground">{plural(folderCount(f), 'file')}</span>

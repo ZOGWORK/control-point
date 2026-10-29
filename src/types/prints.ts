@@ -155,6 +155,8 @@ export interface PrintFile {
   source: 'upload' | 'control-kit';
 }
 export interface PrintLibrary {
+  /** The workspace this library belongs to; every write names it (a write after a workspace switch is refused). */
+  teamId: number;
   canEdit: boolean;
   usage: { used: number; quota: number; maxFile: number };
   folders: PrintFolder[];

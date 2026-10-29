@@ -16,8 +16,12 @@ export class PrintsError extends Error {
   constructor(message: string, public status: number, public body: any) { super(message); }
 }
 
+/** The workspace the open library belongs to, sent with every call so one made after a workspace switch is refused. */
+let boundTeam: number | null = null;
 async function call<T = any>(url: string, init?: RequestInit): Promise<T> {
-  const r = await apiFetch(url, init);
+  const headers = new Headers(init?.headers);
+  if (boundTeam != null && url !== '/api/prints/library') headers.set('X-CP-Prints-Team', String(boundTeam));
+  const r = await apiFetch(url, { ...init, headers });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new PrintsError(body?.error || `Request failed (${r.status})`, r.status, body);
   return body as T;
@@ -55,11 +59,14 @@ export function usePrints() {
   const [lib, setLib] = useState<PrintLibrary | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const seq = useRef(0);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; boundTeam = null; }; }, []);
   const reload = useCallback(async () => {
     const id = ++seq.current;
     try {
       const next = await call<PrintLibrary>('/api/prints/library');
       if (id !== seq.current) return;
+      boundTeam = next.teamId;
       setLib(next);
       setState('ready');
     } catch { if (id === seq.current) setState((s) => (s === 'ready' ? s : 'error')); }
@@ -99,6 +106,8 @@ export function usePrints() {
       onItem([...items]);
       const stored: { id: number; name: string; renamed: boolean }[] = [];
       for (let i = 0; i < files.length; i++) {
+        // Leaving the page stops the queue; the files already sent stay.
+        if (!alive.current) break;
         const f = files[i];
         if (!printKind(f.name)) { update(i, { state: 'error', message: 'Not a print file (STL, 3MF, STEP, OBJ or G-code)' }); continue; }
         if (lib && f.size > lib.usage.maxFile) { update(i, { state: 'error', message: `Over the ${Math.round(lib.usage.maxFile / 1048576)} MB limit` }); continue; }
@@ -116,9 +125,10 @@ export function usePrints() {
           update(i, { state: 'done', message: r.renamed ? `Saved as ${r.name}` : undefined });
         } catch (e: any) {
           update(i, { state: 'error', message: e?.message || 'Upload failed' });
-          // Out of room: the rest won't fit either.
-          if (e instanceof PrintsError && (e.body?.code === 'quota' || e.body?.code === 'disk_full')) {
-            for (let j = i + 1; j < files.length; j++) update(j, { state: 'error', message: 'Not uploaded: no room left' });
+          // Out of room, or a workspace switch: the rest stop too (they'd land nowhere, or in the other workspace).
+          if (e instanceof PrintsError && (e.body?.code === 'quota' || e.body?.code === 'disk_full' || e.body?.code === 'workspace_changed')) {
+            const why = e.body?.code === 'workspace_changed' ? 'Not uploaded: you switched workspaces' : 'Not uploaded: no room left';
+            for (let j = i + 1; j < files.length; j++) update(j, { state: 'error', message: why });
             break;
           }
         }

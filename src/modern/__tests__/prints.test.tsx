@@ -27,6 +27,7 @@ const file = (id: number, name: string, over: Partial<PrintFile> = {}): PrintFil
 });
 let lib: PrintLibrary;
 const seed = (): PrintLibrary => ({
+  teamId: 1,
   canEdit: true,
   usage: { used: 5 * 1048576, quota: 2048 * 1048576, maxFile: 100 * 1048576 },
   folders: [

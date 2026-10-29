@@ -4,7 +4,8 @@
 --     Names are unique per parent, ignoring case.
 --   print_files: one row per file; the bytes live on the VM's disk under
 --     PRINTS_DIR at storage_key (never derived from a user-typed name), with
---     an optional PNG thumbnail at thumb_key. Smart groups are computed from
+--     an optional PNG thumbnail at thumb_key (thumb_size counts toward the
+--     workspace quota with size). Smart groups are computed from
 --     these details: robot_id (its season comes from the robot) or season,
 --     cad_part_id (its assembly section is the subsystem and its quantity the
 --     copies needed unless set here), material, status. source is 'upload'
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS print_files (
   sha256 TEXT NOT NULL,
   storage_key TEXT NOT NULL,
   thumb_key TEXT,
+  thumb_size INTEGER NOT NULL DEFAULT 0,
   notes TEXT NOT NULL DEFAULT '',
   robot_id INTEGER,
   season INTEGER,
