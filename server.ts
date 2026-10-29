@@ -2411,6 +2411,7 @@ async function startServer() {
     requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
     // Declared further down; only called per request, after startup.
     storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
+    deleteStoredFile: (url) => deleteStoredFileByUrl(url),
     appUrl: (req) => (process.env.APP_URL || "").replace(/\/$/, "") || getBaseUrl(req),
   });
   controlKit.registerBearerRoutes(app);
@@ -16749,9 +16750,11 @@ NOTES>>>`;
       const teamId = cadTeam(auth, res); if (!teamId) return;
       const id = parseInt(req.params.id, 10);
       if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
-      const part = (await dbGet("SELECT id FROM cad_parts WHERE id = ? AND team_id = ?", id, teamId)) as any;
+      const part = (await dbGet("SELECT id, ck_picture_url FROM cad_parts WHERE id = ? AND team_id = ?", id, teamId)) as any;
       if (!part) return res.status(404).json({ error: "Not found" });
       await dbRun("DELETE FROM cad_parts WHERE id = ?", id);
+      // Its Onshape picture from Control Kit (contract v1.2 §6) goes with it.
+      if (part.ck_picture_url) await deleteStoredFileByUrl(part.ck_picture_url);
       res.json({ success: true });
     } catch (e) { console.error("CAD part delete error:", e); res.status(500).json({ error: "Internal server error" }); }
   });
