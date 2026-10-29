@@ -26,7 +26,7 @@ export const TEAM_MODULES: readonly TeamModule[] = [
   { id: 'notebook', label: 'Notebook', description: 'Engineering notebook', navIds: ['notebook'] },
   { id: 'comm', label: 'Communication', description: 'Log of emails and announcements with sponsors and partners', navIds: ['comm'] },
   { id: 'inventory', label: 'Inventory', description: 'Parts, quantities and locations', navIds: ['inventory'] },
-  { id: 'cad', label: 'CAD', description: 'Onshape docs, design reviews, snapshots and parts list', navIds: ['cad', 'cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts'] },
+  { id: 'cad', label: 'CAD', description: 'Onshape docs, design reviews, snapshots, parts list and the Prints library', navIds: ['cad', 'cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts', 'prints'] },
   { id: 'code', label: 'Code', description: 'Robot code editor and GitHub sync', navIds: ['code'] },
   { id: 'stats', label: 'Team Stats', description: 'Match scouting, event history and team analysis', navIds: ['stats'] },
   { id: 'predict', label: 'Predict', description: 'Match and event forecasts', navIds: ['predict'] },
