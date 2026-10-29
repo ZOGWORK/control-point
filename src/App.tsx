@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { isNavIdDisabled, parseDisabledModules } from './types/teamModules';
 import { Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { LayoutDashboard, Users, Crown, Pencil, CalendarCheck, CheckSquare, Wallet, Globe, Newspaper, Mail, X, ChevronRight, ChevronDown, Plus, AtSign, TrendingUp, MessageSquare, Lock, Calendar, UserCheck, Zap, Trash2, Bolt, Code2, Check, ShieldCheck, UserX, Copy, Sparkles, Save, Trophy, Layers, Box, FileBox, ClipboardCheck, ClipboardList, Package, ChevronUp, Phone, Video, ScanLine, Keyboard, BadgeCheck, Loader2, CheckCircle2, Clock3, ListTodo } from 'lucide-react';
+import { LayoutDashboard, Users, Crown, Pencil, CalendarCheck, CheckSquare, Wallet, Globe, Newspaper, Mail, X, ChevronRight, ChevronDown, Plus, AtSign, TrendingUp, MessageSquare, Lock, Calendar, UserCheck, Zap, Trash2, Bolt, Code2, Check, ShieldCheck, UserX, Copy, Sparkles, Save, Trophy, Layers, Box, Printer, FileBox, ClipboardCheck, ClipboardList, Package, ChevronUp, Phone, Video, ScanLine, Keyboard, BadgeCheck, Loader2, CheckCircle2, Clock3, ListTodo } from 'lucide-react';
 import { ContextMenuProvider, useContextMenu } from './components/contextmenu/ContextMenuProvider';
 import { motion } from 'motion/react';
 // Heavy libraries stay out of the initial bundle: recharts (via TaskAnalytics),
@@ -35,6 +35,7 @@ const OutreachPage = React.lazy(() => import('./modern/pages/outreach/OutreachPa
 const ChecklistsPage = React.lazy(() => import('./modern/pages/checklists/ChecklistsPage').then((m) => ({ default: m.ChecklistsPage })));
 const ResourcesPage = React.lazy(() => import('./modern/pages/resources/ResourcesPage').then((m) => ({ default: m.ResourcesPage })));
 const CadPage = React.lazy(() => import('./modern/pages/cad/CadPage').then((m) => ({ default: m.CadPage })));
+const PrintsPage = React.lazy(() => import('./modern/pages/prints/PrintsPage').then((m) => ({ default: m.PrintsPage })));
 
 /** Lightweight placeholder while a heavy lazy chunk (charts, code editor) loads. */
 function ChartLoadingFallback({ label = 'Loading…' }: { label?: string }) {
@@ -309,6 +310,7 @@ const navItems = [
   { id: 'inventory', path: 'inventory', labelKey: 'nav.inventory', icon: Zap, scope: 'inventory', group: 'Engineering' },
   { id: 'checklists', path: 'checklists', labelKey: 'nav.checklists', icon: ClipboardList, group: 'Engineering' },
   { id: 'cad', path: 'cad', labelKey: 'nav.cad', icon: Box, group: 'Engineering' },
+  { id: 'prints', path: 'prints', labelKey: 'nav.prints', icon: Printer, group: 'Engineering' },
   { id: 'code', path: 'code', labelKey: 'nav.code', icon: Code2, scope: 'code', group: 'Engineering' },
   { id: 'outreach', path: 'outreach', labelKey: 'nav.outreach', icon: Globe, group: 'Outreach' },
   { id: 'budget', path: 'budget', labelKey: 'nav.budget', icon: Wallet, scope: 'budget', group: 'Outreach' },
@@ -1952,7 +1954,7 @@ export default function App() {
   };
 
   // Students get a focused personal workspace; admins get everything
-  const studentTabIds = ['dashboard', 'teams', 'stats', 'predict', 'attendance', 'tasks', 'calendar', 'notebook', 'budget', 'inventory', 'outreach', 'comm', 'chat', 'cad', 'cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts', 'resources', 'checklists'];
+  const studentTabIds = ['dashboard', 'teams', 'stats', 'predict', 'attendance', 'tasks', 'calendar', 'notebook', 'budget', 'inventory', 'outreach', 'comm', 'chat', 'cad', 'cad-docs', 'cad-reviews', 'cad-snapshots', 'cad-parts', 'prints', 'resources', 'checklists'];
   // Modules the workspace switched off (Settings → Workspace → Modules).
   const disabledModules = useMemo(
     () => parseDisabledModules(teams.find((t: any) => t.id === currentUser?.team_id)?.disabled_modules),
@@ -2386,6 +2388,7 @@ export default function App() {
         <Route path="/cad-reviews" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-snapshots" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
         <Route path="/cad-parts" element={<CadPage activeTab={activeTab} currentUser={currentUser} isAdmin={isAdmin} />} />
+        <Route path="/prints" element={<PrintsPage />} />
         <Route path="/comm" element={<CommunicationPage {...viewProps} />} />
         <Route path="/chat" element={messagingOn ? <MessagesPage {...viewProps} memberMenuItems={memberMenuItems} /> : <MessagingOff />} />
         <Route path="/resources" element={<ResourcesPage />} />

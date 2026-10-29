@@ -96,6 +96,7 @@ import { registerNotebookReviewRoutes } from "./server/notebookReviews.js";
 import { registerChecklistRoutes } from "./server/checklists.js";
 import { createControlKitLink, deleteGrantsSql } from "./server/controlKitLink.js";
 import { createCadRobots, defaultRobotId, teamRobotId } from "./server/cadRobots.js";
+import { createPrints, PRINTS_WORKSPACE_DELETE } from "./server/prints.js";
 import { registerStickyNoteRoutes } from "./server/stickyNotes.js";
 import { isRefType, resolveRef, type RefDeps } from "./server/refs.js";
 import { createRefsFilter, refsBlock, stripModelRefs, validateRefs } from "./server/brunoRefs.js";
@@ -2024,6 +2025,7 @@ const ROLE_PERMISSIONS = [
   { key: "manage_checklists", label: "Manage checklists" },
   { key: "manage_documentation", label: "Manage documentation" },
   { key: "manage_cad", label: "Manage CAD robots and part choices" },
+  { key: "manage_prints", label: "Upload and organize 3D prints" },
   { key: "edit_notebook", label: "Edit notebook pages" },
   { key: "organize_notebook", label: "Organize notebooks" },
   { key: "delete_notebook", label: "Delete notebook items" },
@@ -2096,14 +2098,14 @@ async function ensureRolesSeeded(teamId: number | null | undefined) {
   if (!names.has("Member")) {
     const memberRole = (await dbRun(
       "INSERT INTO roles (team_id, name, color, permissions, position, is_system) VALUES (?,?,?,?,?,1)",
-      teamId, "Member", "#71717A", JSON.stringify(["view_ai", "manage_calendar", "manage_communications", "manage_tasks", "manage_outreach", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad"]), 1
+      teamId, "Member", "#71717A", JSON.stringify(["view_ai", "manage_calendar", "manage_communications", "manage_tasks", "manage_outreach", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad", "manage_prints"]), 1
     )) as any;
     memberRoleId = Number(memberRole.lastInsertRowid);
   }
   if (!names.has("Verified Member")) {
     await dbRun(
       "INSERT INTO roles (team_id, name, color, permissions, position, is_system) VALUES (?,?,?,?,?,1)",
-      teamId, "Verified Member", "#22C55E", JSON.stringify(["view_ai", "manage_inventory", "manage_calendar", "manage_tasks", "manage_documentation", "manage_communications", "manage_outreach", "manage_attendance", "manage_code", "manage_budget", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad"]), 2
+      teamId, "Verified Member", "#22C55E", JSON.stringify(["view_ai", "manage_inventory", "manage_calendar", "manage_tasks", "manage_documentation", "manage_communications", "manage_outreach", "manage_attendance", "manage_code", "manage_budget", "manage_checklists", "edit_notebook", "organize_notebook", "manage_cad", "manage_prints"]), 2
     );
   }
 
@@ -2402,6 +2404,8 @@ async function startServer() {
   // are registered with the CAD routes, behind the guard.
   // CAD by season and robot; Control Kit reads the part choices made in it.
   const cadRobots = createCadRobots({ dbGet, dbAll, dbRun, dbBatchResults, requireAuth: requireAuth as any, hasPerm });
+  // The Prints library (server/prints.ts): 3D print files on the VM's disk, in folders and groups.
+  const prints = createPrints({ dbGet, dbAll, dbRun, dbBatchResults, requireAuth: requireAuth as any, hasPerm, env: process.env });
   const controlKit = createControlKitLink({
     dbGet, dbAll, dbRun, dbBatchResults, env: process.env, decisionsFor: cadRobots.decisionsFor,
     requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
@@ -5419,6 +5423,9 @@ async function startServer() {
       { sql: "DELETE FROM cad_parts WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_imports WHERE team_id = ?", args: [teamId] },
       { sql: "DELETE FROM cad_docs WHERE team_id = ?", args: [teamId] },
+      // The Prints library: rows here, bytes on disk after the batch commits.
+      ...PRINTS_WORKSPACE_DELETE.others.map((sql) => ({ sql, args: [teamId] })),
+      { sql: PRINTS_WORKSPACE_DELETE.files, args: [teamId] },
       { sql: "DELETE FROM checkin_sessions WHERE team_id = ?", args: [teamId] },
       // References teams without a cascade.
       { sql: "DELETE FROM call_moderation_log WHERE team_id = ?", args: [teamId] },
@@ -5453,6 +5460,7 @@ async function startServer() {
     const deletedIds = (sql: string) => (results[stmts.findIndex((s) => s.sql === sql)]?.rows || []).map((row: any) => Number(row.id));
     // Remove the private object copies only after the database deletion commits.
     for (const fileId of deletedIds(FILES_STMT)) await deleteStoredRow(fileId);
+    await prints.removeStored(results[stmts.findIndex((s) => s.sql === PRINTS_WORKSPACE_DELETE.files)]?.rows || []).catch((e) => console.error("Deleting print files failed:", e?.message || e));
     for (const imageId of deletedIds(IMAGES_STMT)) await deleteMessageImageRow(imageId).catch((e) => console.error("Deleting a chat image failed:", e?.message || e));
     for (const id of memberIds) if (id !== keepMemberId) disconnectMember(teamId, id);
   }
@@ -16437,6 +16445,7 @@ NOTES>>>`;
     return auth.teamId as number;
   };
   cadRobots.registerRoutes(app);
+  prints.registerRoutes(app);
   // Lists take ?robot= to show one robot's rows; a new row goes to the robot it names, else the team's latest main robot.
   const cadRobotFilter = async (teamId: number, q: unknown) => {
     if (q === undefined || q === "") return { sql: "", args: [] as any[] };

@@ -26,6 +26,7 @@ const resources = {
         designReviews: 'Design Reviews',
         snapshots: 'Snapshots',
         partsList: 'Parts List',
+        prints: 'Prints',
         code: 'Code',
         outreach: 'Outreach',
         budget: 'Budget',

@@ -34,7 +34,7 @@ export interface ModernNavSection {
 const SECTION_OF: Record<string, string> = {
   teams: 'team', attendance: 'team', calendar: 'team', tasks: 'team', notebook: 'team',
   stats: 'compete', predict: 'compete',
-  cad: 'build', code: 'build', inventory: 'build',
+  cad: 'build', prints: 'build', code: 'build', inventory: 'build',
   outreach: 'ops', comm: 'ops', budget: 'ops', resources: 'ops', checklists: 'build',
   owner: 'admin',
 };
@@ -63,7 +63,7 @@ export function buildModernNav(visible: NavItemLike[]): { primary: ModernNavItem
     (buckets[sec] ??= []).push(toItem(t));
   }
   // Keep a stable, intentional order inside each section.
-  const ORDER = ['teams', 'roles', 'attendance', 'calendar', 'tasks', 'notebook', 'stats', 'predict', 'cad', 'code', 'inventory', 'checklists', 'outreach', 'comm', 'budget', 'resources', 'owner'];
+  const ORDER = ['teams', 'roles', 'attendance', 'calendar', 'tasks', 'notebook', 'stats', 'predict', 'cad', 'prints', 'code', 'inventory', 'checklists', 'outreach', 'comm', 'budget', 'resources', 'owner'];
   const sections = SECTION_ORDER
     .filter((id) => buckets[id]?.length)
     .map((id) => ({
