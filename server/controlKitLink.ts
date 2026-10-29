@@ -1,4 +1,4 @@
-// Control Kit link (contract: control-kit docs/control-point-link.md, v1).
+// Control Kit link (contract: control-kit docs/control-point-link.md, v1.2).
 // Control Kit, the Onshape BOM app, links to a Control Point account with an
 // authorization code, then sends reviewed BOMs into a workspace's parts list
 // with a bearer token. A grant belongs to an account (its email), never to a
@@ -14,6 +14,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { RateLimiter, clientIp } from "./rateLimit.js";
 import { sanitizePartInput } from "./cad.js";
 import { robotForAssembly } from "./cadRobots.js";
+import { checkReviewAsk, reviewConfigured, ReviewError, runReview } from "./controlKitAi.js";
 import { parseDisabledModules } from "../src/types/teamModules.js";
 
 type Auth = { memberId: number; teamId: number | null; teamless?: boolean; email?: string };
@@ -31,6 +32,10 @@ export interface ControlKitDeps {
   env: Record<string, string | undefined>;
   /** Choices made in Control Point for one document's parts (cadRobots.decisionsFor). */
   decisionsFor: (teamId: number, documentId: string) => Promise<any[]>;
+  /** Delete a stored file by its /api/files/:id URL (best effort): a replaced upload or picture. */
+  deleteStoredFile?: (url: string) => Promise<void>;
+  /** The fetch behind AI review's model calls (controlKitAi.runReview); tests swap it. */
+  reviewFetch?: typeof fetch;
 }
 
 export const CONTROL_KIT_CLIENT_ID = "control-kit";
@@ -40,6 +45,44 @@ export const BOM_LIMIT = "12mb";
 const MAX_CAD_PARTS = 5000;
 const MAX_FILES = 20;
 const TOKEN_PREFIX = "ckp_";
+/** A file uploaded after a send (contract v1.2 §6): the STEP zip, a large workbook, or a CSV. */
+export const FILE_LIMIT_BYTES = 64 * 1024 * 1024;
+export const UPLOAD_TYPES: Record<string, RegExp> = {
+  "application/zip": /\.zip$/i,
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": /\.xlsx$/i,
+  "text/csv": /\.csv$/i,
+};
+/** Part pictures: one call holds at most this many, each a PNG of at most 1 MB. */
+export const PICTURES_PER_CALL = 40;
+export const PICTURE_LIMIT_BYTES = 1024 * 1024;
+export const PICTURES_BODY_LIMIT = "8mb";
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** AI review per workspace (contract v1.2 §7): at most this many an hour and a day. Control Kit keeps its own per-person limits. */
+export const AI_REVIEWS_PER_HOUR = 20;
+export const AI_REVIEWS_PER_DAY = 100;
+
+/** A file name as uploaded: 1 to 160 characters, no path separators or control characters. */
+export function uploadName(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const name = v.trim();
+  return name && name.length <= 160 && !/[\\/\u0000-\u001f\u007f]/.test(name) && name !== "." && name !== ".." ? name : null;
+}
+/** Which placeholder an uploaded file fills: a bundle lists a missing STEP zip or workbook by a label, not a file name. */
+function fillsPlaceholder(entry: any, name: string): boolean {
+  if (entry?.stored) return false;
+  const n = String(entry?.name || "");
+  if (/\.zip$/i.test(name)) return /\.zip$/i.test(n) || /\bSTEP\b/i.test(n);
+  if (/\.xlsx$/i.test(name)) return /\.xlsx$/i.test(n) || /\b(Excel|workbook)\b/i.test(n);
+  if (/\.csv$/i.test(name)) return /\.csv$/i.test(n);
+  return false;
+}
+/** An import's files with `upload` in place of the entry of the same name, or of the placeholder it fills, else appended. */
+export function withUploadedFile(files: any[], upload: any): any[] {
+  const same = files.findIndex((f) => f?.name === upload.name);
+  const at = same >= 0 ? same : files.findIndex((f) => fillsPlaceholder(f, upload.name));
+  if (at < 0) return [...files, upload].slice(-MAX_FILES);
+  return files.map((f, i) => (i === at ? upload : f));
+}
 /** An unfinished import whose claim is older than this was abandoned; a retry finishes it. */
 export const IMPORT_STALL_MS = 2 * 60 * 1000;
 /** A claim on an unfinished import: when it was taken (so it ages and sorts like a timestamp) plus who took it. */
@@ -382,6 +425,131 @@ export function createControlKitLink(deps: ControlKitDeps) {
     await finishImport(req, res, importId, team, body, false, claim);
   }
 
+  /** One finished import of the guarded workspace, or a 404/409 already sent. */
+  async function finishedImport(req: any, res: any) {
+    const row = await dbGet("SELECT * FROM cad_imports WHERE id = ? AND team_id = ?", Number(req.params.importId), Number(req.ck.team.id));
+    if (!row) { res.status(404).json({ error: "not_found", detail: "No such import in this workspace." }); return null; }
+    if (!row.finished_at) { res.setHeader("Retry-After", "5"); res.status(409).json({ error: "in_progress", retryAfter: 5 }); return null; }
+    return row;
+  }
+  const parseFiles = (raw: unknown): any[] => { try { const v = JSON.parse(String(raw || "[]")); return Array.isArray(v) ? v : []; } catch { return []; } };
+  const dropStored = async (url: string | null | undefined) => { if (url && deps.deleteStoredFile) await deps.deleteStoredFile(url).catch(() => {}); };
+
+  /**
+   * A file uploaded after its send (contract v1.2 §6): raw bytes, checked against the SHA-256 Control Kit names, stored as
+   * a CAD doc of the import, and put in the import's file list in place of the entry it completes. The list is swapped
+   * only from the value it was read as, so two uploads to one import never drop each other.
+   */
+  async function uploadFile(req: any, res: any) {
+    const teamId = Number(req.ck.team.id);
+    const row = await finishedImport(req, res);
+    if (!row) return;
+    const name = uploadName(req.query.name);
+    const mediaType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+    if (!name) return res.status(400).json({ error: "bad_file", detail: "name is missing or not a plain file name." });
+    if (!UPLOAD_TYPES[mediaType]?.test(name)) return res.status(415).json({ error: "bad_file", detail: "Only a .zip, .xlsx or .csv file of the matching type." });
+    const want = String(req.headers["x-content-sha256"] || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(want)) return res.status(400).json({ error: "bad_file", detail: "X-Content-SHA256 is missing." });
+    const buffer: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (!buffer.length) return res.status(400).json({ error: "bad_file", detail: "The file is empty." });
+    if (sha256(buffer) !== want) return res.status(400).json({ error: "checksum_mismatch", detail: "The bytes do not match X-Content-SHA256." });
+    const earlier = parseFiles(row.files).find((f) => f?.name === name && f?.stored);
+    if (earlier && String(earlier.sha256 || "").toLowerCase() === want) {
+      return res.json({ name, url: earlier.url, sizeBytes: buffer.length, sha256: want, duplicate: true });
+    }
+    const fileId = await deps.storeFile({ teamId, memberId: Number(req.ck.team.member_id), kind: "cad", filename: name, mimeType: mediaType, buffer });
+    const url = deps.fileUrl(fileId);
+    const entry = { name, mediaType, sizeBytes: buffer.length, sha256: want, stored: true, url, uploadedAt: new Date().toISOString() };
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const current = await dbGet("SELECT files FROM cad_imports WHERE id = ?", row.id);
+      const before = parseFiles(current?.files);
+      const replaced = before.find((f) => f?.name === name && f?.stored && f?.url);
+      const next = withUploadedFile(before, entry);
+      const swapped = await dbRun(
+        "UPDATE cad_imports SET files = ?, result = json_set(COALESCE(result, '{}'), '$.filesStored', ?) WHERE id = ? AND COALESCE(files, '') = COALESCE(?, '')",
+        JSON.stringify(next), next.filter((f) => f?.stored).length, row.id, current?.files ?? null);
+      if (!swapped.changes) continue;
+      await dbRun("INSERT INTO cad_docs (team_id, name, url, created_by, created_at, ck_import_id, robot_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        teamId, name, url, Number(req.ck.team.member_id), entry.uploadedAt, row.id, row.robot_id ?? null);
+      if (replaced) {
+        await dbRun("DELETE FROM cad_docs WHERE team_id = ? AND ck_import_id = ? AND url = ?", teamId, row.id, replaced.url);
+        await dropStored(replaced.url);
+      }
+      return res.json({ name, url, sizeBytes: buffer.length, sha256: want, duplicate: false });
+    }
+    await dropStored(url);
+    res.setHeader("Retry-After", "2");
+    res.status(409).json({ error: "busy", detail: "The import's files changed while saving. Try again.", retryAfter: 2 });
+  }
+
+  /** Which parts of an import's assembly already have a picture, and of which revision (Control Kit's key). */
+  async function pictureKeys(req: any, res: any) {
+    const row = await finishedImport(req, res);
+    if (!row) return;
+    const rows = await dbAll(
+      "SELECT ck_part_key, ck_picture_key, ck_picture_at FROM cad_parts WHERE team_id = ? AND ck_document_id = ? AND ck_element_id = ? AND ck_part_key IS NOT NULL AND ck_picture_key IS NOT NULL",
+      Number(req.ck.team.id), row.document_id, row.element_id);
+    res.json({ pictures: rows.map((r) => ({ identity: String(r.ck_part_key), key: String(r.ck_picture_key), at: r.ck_picture_at || null })) });
+  }
+
+  /**
+   * Part pictures for an import's assembly (contract v1.2 §6): PNGs keyed by part identity and Control Kit's revision
+   * key. A part already holding that key is left alone; a newer one replaces the old file. Unknown parts are counted.
+   */
+  async function uploadPictures(req: any, res: any) {
+    const teamId = Number(req.ck.team.id);
+    const row = await finishedImport(req, res);
+    if (!row) return;
+    const list = req.body?.pictures;
+    if (!Array.isArray(list) || !list.length || list.length > PICTURES_PER_CALL) return res.status(400).json({ error: "bad_payload", detail: `pictures must hold 1 to ${PICTURES_PER_CALL} items.` });
+    let stored = 0, unchanged = 0, unknown = 0, rejected = 0;
+    for (const p of list) {
+      const key = typeof p?.key === "string" && /^[\w:.-]{1,128}$/.test(p.key) ? p.key : null;
+      const identity = partKey({ identity: p?.identity });
+      const buffer = typeof p?.contentBase64 === "string" && p.contentBase64.length <= Math.ceil(PICTURE_LIMIT_BYTES / 3) * 4 + 4 ? Buffer.from(p.contentBase64, "base64") : null;
+      if (!key || !identity || !buffer || buffer.length > PICTURE_LIMIT_BYTES || buffer.length < 16 || !buffer.subarray(0, 8).equals(PNG_MAGIC)) { rejected++; continue; }
+      const part = await dbGet("SELECT id, ck_picture_url, ck_picture_key FROM cad_parts WHERE team_id = ? AND ck_document_id = ? AND ck_element_id = ? AND ck_part_key = ?",
+        teamId, row.document_id, row.element_id, identity);
+      if (!part) { unknown++; continue; }
+      if (part.ck_picture_key === key) { unchanged++; continue; }
+      const fileId = await deps.storeFile({ teamId, memberId: Number(req.ck.team.member_id), kind: "cad", filename: `${String(row.assembly_name || "part").slice(0, 60)} part.png`, mimeType: "image/png", buffer });
+      const url = deps.fileUrl(fileId);
+      // Swapped only from the picture this read saw: a picture stored meanwhile by another send keeps its place.
+      const swapped = await dbRun("UPDATE cad_parts SET ck_picture_url = ?, ck_picture_key = ?, ck_picture_at = ? WHERE id = ? AND COALESCE(ck_picture_url, '') = ?",
+        url, key, new Date().toISOString(), part.id, part.ck_picture_url || "");
+      if (!swapped.changes) { await dropStored(url); unchanged++; continue; }
+      await dropStored(part.ck_picture_url);
+      stored++;
+    }
+    res.json({ stored, unchanged, unknown, rejected });
+  }
+
+  /** Control Kit's AI review with Control Point's own model keys (contract v1.2 §7), within a per-workspace allowance. */
+  async function aiReview(req: any, res: any) {
+    if (!reviewConfigured(deps.env)) return res.status(501).json({ error: "ai_unavailable", detail: "AI review is not set up on this Control Point server." });
+    const check = checkReviewAsk(req.body);
+    if (check.ok === false) return res.status(400).json({ error: "bad_payload", detail: check.detail });
+    const teamId = Number(req.ck.team.id);
+    const wait = limiter.hit(`ai-hour:${teamId}`, { max: AI_REVIEWS_PER_HOUR, windowMs: 3600_000 }) || limiter.hit(`ai-day:${teamId}`, { max: AI_REVIEWS_PER_DAY, windowMs: 86400_000 });
+    if (wait) {
+      res.setHeader("Retry-After", String(wait));
+      return res.status(429).json({ error: "rate_limited", detail: "This workspace has used its AI reviews for now.", retryAfter: wait });
+    }
+    try {
+      const answer = await runReview(deps.env, check.ask, deps.reviewFetch ?? fetch);
+      res.setHeader("Cache-Control", "no-store");
+      // The model's items as it gave them; Control Kit keeps only those that fit its own request.
+      const items = Array.isArray((answer.output as any)?.items) ? (answer.output as any).items.slice(0, 200) : [];
+      res.json({ items, provider: answer.provider, usage: answer.usage });
+    } catch (e) {
+      if (e instanceof ReviewError) {
+        if (e.status === 429) res.setHeader("Retry-After", "60");
+        return res.status(e.status).json({ error: e.code, detail: e.message });
+      }
+      throw e;
+    }
+  }
+
   /** Token exchange, workspaces, BOM send, import history, revoke. Register before the /api session and CSRF guard. */
   function registerBearerRoutes(app: Express) {
     const base = "/api/integrations/control-kit";
@@ -446,6 +614,32 @@ export function createControlKitLink(deps: ControlKitDeps) {
         if (!document) return res.status(400).json({ error: "bad_request", detail: "document is required." });
         res.json({ decisions: await deps.decisionsFor(Number(req.ck.team.id), document) });
       } catch (e) { console.error("Control Kit decisions error:", e); res.status(500).json({ error: "server_error" }); }
+    });
+
+    // Contract v1.2 §6: files uploaded after a send, and part pictures.
+    app.post(`${base}/workspaces/:id/imports/:importId/files`, guard(true), express.raw({ type: () => true, limit: FILE_LIMIT_BYTES }), (err: any, _req: any, res: any, next: any) => {
+      if (err?.type === "entity.too.large") return res.status(413).json({ error: "too_large", detail: `A file can be at most ${FILE_LIMIT_BYTES / 1024 / 1024} MB.` });
+      next(err);
+    }, async (req: any, res: any) => {
+      try { await uploadFile(req, res); } catch (e) { console.error("Control Kit file upload error:", e); res.status(500).json({ error: "server_error" }); }
+    });
+    app.get(`${base}/workspaces/:id/imports/:importId/pictures`, guard(false), async (req: any, res) => {
+      try { await pictureKeys(req, res); } catch (e) { console.error("Control Kit picture list error:", e); res.status(500).json({ error: "server_error" }); }
+    });
+    app.post(`${base}/workspaces/:id/imports/:importId/pictures`, guard(true), express.json({ limit: PICTURES_BODY_LIMIT }), (err: any, _req: any, res: any, next: any) => {
+      if (err?.type === "entity.too.large") return res.status(413).json({ error: "too_large", detail: `Pictures go at most ${PICTURES_BODY_LIMIT.toUpperCase()} per call.` });
+      if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "bad_payload", detail: "Body is not valid JSON." });
+      next(err);
+    }, async (req: any, res: any) => {
+      try { await uploadPictures(req, res); } catch (e) { console.error("Control Kit picture upload error:", e); res.status(500).json({ error: "server_error" }); }
+    });
+    // Contract v1.2 §7: AI review with Control Point's keys.
+    app.post(`${base}/workspaces/:id/ai/review`, guard(true), express.json({ limit: "256kb" }), (err: any, _req: any, res: any, next: any) => {
+      if (err?.type === "entity.too.large") return res.status(413).json({ error: "too_large", detail: "An AI review can be at most 256 KB." });
+      if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "bad_payload", detail: "Body is not valid JSON." });
+      next(err);
+    }, async (req: any, res: any) => {
+      try { await aiReview(req, res); } catch (e) { console.error("Control Kit AI review error:", e); res.status(500).json({ error: "server_error" }); }
     });
 
     app.post(`${base}/revoke`, async (req, res) => {

@@ -140,6 +140,39 @@ describe("a robot's BOM", () => {
   it('lists the files Control Kit sent on the Files tab', async () => {
     setup('/cad/robots/1?tab=files');
     expect(await screen.findByRole('link', { name: 'MR. HORS BOM.xlsx' })).toHaveAttribute('href', '/api/files/9');
-    expect(screen.getByText('Available in Control Kit')).toBeInTheDocument();
+    expect(screen.getByText('Not uploaded yet. In Control Kit, press Add STEP files.')).toBeInTheDocument();
+  });
+
+  it('downloads the newest STEP zip and workbook from the header, the Make group and the Files tab', async () => {
+    const zip = { name: 'MR. HORS STEP.zip', stored: true, url: '/api/files/12', sizeBytes: 3_400_000 };
+    imports.unshift({ ...imports[0], id: 42, sentAt: '2026-10-27T15:00:00.000Z', files: [{ name: 'MR. HORS BOM.xlsx', stored: true, url: '/api/files/13' }] } as any);
+    imports[1] = { ...imports[1], files: [...imports[1].files.filter((f) => !/zip$/.test(f.name)), zip] } as any;
+    try {
+      setup('/cad/robots/1');
+      const step = await screen.findByRole('link', { name: /STEP files for every part to make/ });
+      expect(step).toHaveAttribute('href', '/api/files/12');
+      expect(step).toHaveAttribute('download', 'MR. HORS STEP.zip');
+      // The workbook is the newest send's; the zip comes from the send that had one.
+      expect(screen.getByRole('link', { name: 'Workbook' })).toHaveAttribute('href', '/api/files/13');
+      const make = screen.getByRole('heading', { name: /^Make/ }).closest('section')!;
+      expect(within(make).getByRole('link', { name: 'STEP files' })).toHaveAttribute('href', '/api/files/12');
+      cleanup();
+      setup('/cad/robots/1?tab=files');
+      expect(await screen.findByText(/STEP files from the send of/)).toBeInTheDocument();
+    } finally {
+      imports.shift();
+      imports[0] = { ...imports[0], files: imports[0].files.filter((f) => !/zip$/.test(f.name)).concat({ name: 'MR. HORS STEP.zip', stored: false, note: 'Available in Control Kit' } as any) } as any;
+    }
+  });
+
+  it("shows each part's Onshape picture in its row and drawer", async () => {
+    parts = parts.map((p) => (p.id === 3 ? { ...p, ck_picture_url: '/api/files/30', ck_picture_at: '2026-10-27T15:00:00.000Z' } : p));
+    setup('/cad/robots/1');
+    const make = (await screen.findByRole('heading', { name: /^Make/ })).closest('section')!;
+    expect(within(make).getByRole('img', { name: 'Side panel in Onshape' })).toHaveAttribute('src', '/api/files/30');
+    fireEvent.click(within(make).getByRole('button', { name: 'Side panel' }));
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByRole('img', { name: 'Side panel in Onshape' })).toHaveAttribute('src', '/api/files/30');
+    expect(within(drawer).getByText(/Picture drawn by Onshape, from Control Kit/)).toBeInTheDocument();
   });
 });

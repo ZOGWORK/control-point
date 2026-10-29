@@ -18,11 +18,13 @@ export type BomPart = {
   ck_part_key: string | null; ck_import_id: number | null; ck_removed_at: string | null; ck_extra: any;
   choice_type: CadType | null; choice_type_set: number; choice_type_by: string | null; choice_type_at: string | null;
   choice_product: string | null; choice_product_by: string | null; choice_product_at: string | null;
+  /** The part's Onshape picture from Control Kit (contract v1.2 §6), or null. */
+  ck_picture_url?: string | null; ck_picture_at?: string | null;
   effective: EffectivePart;
 };
 export type RobotImport = {
   id: number; sentAt: string; sentBy: string | null; assemblyName: string | null; assemblyUrl: string | null; revision: string | null; partCount: number;
-  files: { name: string; stored: boolean; url?: string; note?: string; sizeBytes?: number | null }[]; created: number; updated: number; markedRemoved: number;
+  files: { name: string; stored: boolean; url?: string; note?: string; sizeBytes?: number | null; uploadedAt?: string }[]; created: number; updated: number; markedRemoved: number;
 };
 export type RobotDetail = {
   robot: { id: number; name: string; season: number; seasonName: string; isMain: boolean; assemblyUrl: string | null; documentId: string | null; elementId: string | null; notes: string };

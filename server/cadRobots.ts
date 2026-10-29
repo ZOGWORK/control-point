@@ -129,7 +129,8 @@ export function createCadRobots(deps: CadRobotDeps) {
     const rows = await dbAll(
       `SELECT id, name, section, quantity, source, unit_cost, status, assignee, notes, created_at, updated_at, robot_id,
               ck_document_id, ck_element_id, ck_part_key, ck_import_id, ck_extra, ck_removed_at,
-              choice_type, choice_type_set, choice_type_by, choice_type_at, choice_product, choice_product_by, choice_product_at
+              choice_type, choice_type_set, choice_type_by, choice_type_at, choice_product, choice_product_by, choice_product_at,
+              ck_picture_url, ck_picture_at
          FROM cad_parts WHERE team_id = ? AND (robot_id = ?${unassigned}) ORDER BY name COLLATE NOCASE, id`, teamId, robotId);
     return rows.map(partView);
   }

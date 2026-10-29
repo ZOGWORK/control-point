@@ -2407,6 +2407,7 @@ async function startServer() {
     requireAuth: requireAuth as any, authEmail: (auth) => authEmail(auth as any),
     // Declared further down; only called per request, after startup.
     storeFile: (opts) => storeFile(opts), fileUrl: (id) => fileUrl(id),
+    deleteStoredFile: (url) => deleteStoredFileByUrl(url),
     appUrl: (req) => (process.env.APP_URL || "").replace(/\/$/, "") || getBaseUrl(req),
   });
   controlKit.registerBearerRoutes(app);
