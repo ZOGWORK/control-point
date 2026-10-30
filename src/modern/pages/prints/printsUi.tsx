@@ -1,10 +1,12 @@
 // Small pieces of the Prints explorer: status chips, file icons and
 // thumbnails, and the dialogs for naming, moving and collecting.
 import { useMemo, useState, type ReactNode } from 'react';
-import { Box, ChevronRight, FileCode2, Folder, FolderOpen, Layers } from 'lucide-react';
+import { Box, CalendarClock, ChevronRight, FileCode2, Folder, FolderOpen, Layers } from 'lucide-react';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Input, Label } from '../../../components/ui-kit';
 import { cn } from '../../../components/cn';
-import { KIND_LABELS, STATUS_LABELS, folderAndBelow, type PrintFile, type PrintFolder, type PrintKind, type PrintStatus } from '../../../types/prints';
+import {
+  KIND_LABELS, PRIORITY_LABELS, STATUS_LABELS, dueState, dueText, folderAndBelow, type PrintFile, type PrintFolder, type PrintKind, type PrintPriority, type PrintStatus,
+} from '../../../types/prints';
 import { thumbUrl } from './usePrints';
 
 export const STATUS_DOT: Record<PrintStatus, string> = {
@@ -21,6 +23,32 @@ export function StatusChip({ status, className }: { status: PrintStatus; classNa
   return (
     <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium', STATUS_CHIP[status], className)}>
       <span className={cn('size-1.5 rounded-full', STATUS_DOT[status])} aria-hidden />{STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+const PRIORITY_CHIP: Record<PrintPriority, string> = {
+  urgent: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
+  high: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  normal: 'border-border text-muted-foreground',
+  low: 'border-border text-muted-foreground',
+};
+
+/** A file's priority, as a chip. */
+export function PriorityChip({ priority, className }: { priority: PrintPriority; className?: string }) {
+  return (
+    <span className={cn('inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium', PRIORITY_CHIP[priority], className)}>
+      {PRIORITY_LABELS[priority]}<span className="sr-only"> priority</span>
+    </span>
+  );
+}
+
+/** "Due Nov 3", tinted when it's close or past. */
+export function DueChip({ due, className }: { due: string; className?: string }) {
+  const s = dueState(due);
+  return (
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap text-xs', s === 'overdue' ? 'font-medium text-rose-600 dark:text-rose-300' : s === 'today' || s === 'soon' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground', className)}>
+      <CalendarClock className="size-3.5" aria-hidden />{dueText(due)}
     </span>
   );
 }

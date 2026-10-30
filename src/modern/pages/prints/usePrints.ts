@@ -90,6 +90,8 @@ export function usePrints() {
     deleteFolder: (id: number, files?: number) => write(() => call(`/api/prints/folders/${id}${files !== undefined ? `?files=${files}` : ''}`, send('DELETE'))),
     updateFile: (id: number, patch: Record<string, unknown>) => write(() => call<PrintFile>(`/api/prints/files/${id}`, send('PATCH', patch))),
     bulk: (ids: number[], a: BulkAction) => write(() => call<{ files: number }>('/api/prints/files/bulk', send('POST', { ids, ...a }))),
+    /** Save the queue's order (the files still to print, next first); an empty list goes back to priority order. */
+    setQueueOrder: (ids: number[]) => write(() => call<{ files: number }>('/api/prints/queue', send('POST', { ids }))),
     createCollection: (name: string) => write(() => call<{ id: number; name: string }>('/api/prints/collections', send('POST', { name }))),
     renameCollection: (id: number, name: string) => write(() => call(`/api/prints/collections/${id}`, send('PATCH', { name }))),
     deleteCollection: (id: number) => write(() => call(`/api/prints/collections/${id}`, send('DELETE'))),

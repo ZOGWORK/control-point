@@ -2,14 +2,14 @@
 // team thinks about it) side by side. Smart groups are worked out from each
 // file's details; collections are the team's own. Picking a group filters the
 // library; picks in different groups combine ("Intake + PETG + To print").
-// Folders and collections take dropped files.
+// Folders and collections take dropped files. The print queue sits on top.
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react';
-import { ChevronRight, Library, MoreHorizontal, Plus } from 'lucide-react';
+import { ChevronRight, Library, ListOrdered, MoreHorizontal, Plus } from 'lucide-react';
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../../../components/ui-kit';
 import { cn } from '../../../components/cn';
 import { seasonName } from '../../../types/cadBom';
 import {
-  PRINT_STATUSES, STATUS_LABELS, facetValues, matchesFilters, stillToPrint, type FilterKey, type PrintFilters, type PrintFolder, type PrintLibrary,
+  PRINT_STATUSES, STATUS_LABELS, dueState, facetValues, matchesFilters, stillToPrint, type FilterKey, type PrintFilters, type PrintFolder, type PrintLibrary,
 } from '../../../types/prints';
 import { FolderArt, STATUS_DOT } from './printsUi';
 
@@ -54,8 +54,9 @@ function Heading({ children, action }: { children: ReactNode; action?: ReactNode
   );
 }
 
-export function PrintsSidebar({ lib, folderId, filters, groupMode, onFolder, onToggle, drop, onNewCollection, onRenameCollection, onDeleteCollection }: {
-  lib: PrintLibrary; folderId: number | null; filters: PrintFilters; groupMode: boolean;
+export function PrintsSidebar({ lib, folderId, filters, groupMode, queueMode, onQueue, onFolder, onToggle, drop, onNewCollection, onRenameCollection, onDeleteCollection }: {
+  lib: PrintLibrary; folderId: number | null; filters: PrintFilters; groupMode: boolean; queueMode: boolean;
+  onQueue: () => void;
   onFolder: (id: number | null) => void;
   /** Toggle one smart group or collection; picks in different groups combine. */
   onToggle: <K extends FilterKey>(key: K, value: PrintFilters[K]) => void;
@@ -109,12 +110,19 @@ export function PrintsSidebar({ lib, folderId, filters, groupMode, onFolder, onT
   const subsystems = facetValues(lib.files, 'subsystem');
   const materials = facetValues(lib.files, 'material');
   const noRobot = lib.files.filter((f) => f.robotId == null).length;
+  const queued = lib.files.filter((f) => stillToPrint(f.status) || f.status === 'printing');
+  const overdue = queued.filter((f) => dueState(f.dueDate) === 'overdue').length;
 
   return (
     <nav aria-label="Folders and groups" className="text-sm">
+      <ul>
+        <Item active={queueMode} onClick={onQueue} icon={<ListOrdered className="size-4 shrink-0 text-[#b38b00] dark:text-[#ffc700]" />} label="Print queue"
+          sub={overdue ? `${overdue} overdue` : undefined} count={queued.length} />
+      </ul>
+
       <Heading>Folders</Heading>
       <ul>
-        <Item active={!groupMode && folderId === null} onClick={() => onFolder(null)} icon={<Library className="size-4 shrink-0 text-[#b38b00] dark:text-[#ffc700]" />}
+        <Item active={!groupMode && !queueMode && folderId === null} onClick={() => onFolder(null)} icon={<Library className="size-4 shrink-0 text-[#b38b00] dark:text-[#ffc700]" />}
           label="All prints" count={lib.files.length} over={drop.over === 'folder:root'} drop={drop.target('folder:root', { folders: true, os: true })} />
         {(kids.get(null) ?? []).map((f) => folderItem(f, 1))}
       </ul>

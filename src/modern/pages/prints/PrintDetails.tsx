@@ -1,7 +1,8 @@
 // One print file's details, in a side sheet: what it is, where it lives, who
 // added it, and the details its smart groups come from (robot and season, CAD
-// part, subsystem, material, status, copies), plus its collections, notes and
-// history. People without manage_prints see the same details read-only.
+// part, subsystem, material, status, copies), its priority and due date in
+// the print queue, plus its collections, notes and history. People without
+// manage_prints see the same details read-only.
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Box, Download, ExternalLink, FolderInput, Minus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button, Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, Textarea } from '../../../components/ui-kit';
@@ -10,7 +11,8 @@ import { apiFetch } from '../../../services/api';
 import { fmtDate } from '../../../components/cad/useCad';
 import { currentSeason, seasonName } from '../../../types/cadBom';
 import {
-  KIND_LABELS, PRINT_MATERIALS, PRINT_STATUSES, STATUS_LABELS, canPreview, folderTrail, formatBytes, type PrintFile, type PrintLibrary,
+  KIND_LABELS, PRINT_MATERIALS, PRINT_PRIORITIES, PRINT_STATUSES, PRIORITY_LABELS, STATUS_LABELS, canPreview, cleanDueDate, dueState, dueText, folderTrail, formatBytes, stillToPrint,
+  type PrintFile, type PrintLibrary,
 } from '../../../types/prints';
 import { FileArt, STATUS_DOT, copiesText } from './printsUi';
 import { download, fileUrl, type Prints } from './usePrints';
@@ -62,6 +64,8 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
   const [parts, setParts] = useState<{ id: number; name: string; section: string; quantity: number; group: string }[] | null>(null);
   const [history, setHistory] = useState<{ id: number; by: string; action: string; detail: any; at: string }[] | null>(null);
   useEffect(() => { setNotes(file.notes); }, [file.id, file.notes]);
+  const [due, setDue] = useState(file.dueDate ?? '');
+  useEffect(() => { setDue(file.dueDate ?? ''); }, [file.id, file.dueDate]);
   // The linked robot's parts, for the CAD part picker (made parts first).
   useEffect(() => {
     setParts(null);
@@ -137,6 +141,21 @@ export function PrintDetails({ file, lib, prints, onClose, onPreview, onRename, 
             </div>
           ) : <p className="text-sm">{STATUS_LABELS[file.status]}</p>}
         </Row>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Row label="Priority" htmlFor={`${id}-priority`}>
+            <select id={`${id}-priority`} className={field} disabled={!edit} value={file.priority}
+              onChange={(e) => void save({ priority: e.target.value })}>
+              {PRINT_PRIORITIES.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+            </select>
+          </Row>
+          <Row label="Due" htmlFor={`${id}-due`}>
+            {/* Saved once it's a whole date (typing a year passes through 0002, 0020…) or cleared. */}
+            <input id={`${id}-due`} type="date" className={field} disabled={!edit} value={due}
+              onChange={(e) => { const v = e.target.value; setDue(v); if (v !== (file.dueDate ?? '') && (v === '' || cleanDueDate(v))) void save({ dueDate: v || null }); }} />
+          </Row>
+        </div>
+        {file.dueDate && stillToPrint(file.status) && dueState(file.dueDate) === 'overdue' && <p className="-mt-3 text-xs text-rose-600 dark:text-rose-300">{dueText(file.dueDate)}</p>}
 
         <Row label="Copies">
           <div className="flex flex-wrap items-center gap-2 text-sm">
