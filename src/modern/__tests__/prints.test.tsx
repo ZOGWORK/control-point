@@ -312,6 +312,30 @@ describe('Print queue', () => {
     await waitFor(() => expect(sent).toEqual([[4, 3, 1], [3, 1, 4]]));
   });
 
+  it('names the workspace a queued save was made in, even after a switch meanwhile', async () => {
+    lib = queueLib();
+    let finishFirst: () => void = () => {};
+    const teams: (string | null)[] = [];
+    api.apiFetch.mockImplementation((url: string, init?: any) => {
+      if (url === '/api/prints/library') return res(lib);
+      if (url === '/api/prints/queue') {
+        teams.push(new Headers(init.headers).get('X-CP-Prints-Team'));
+        if (teams.length === 1) return new Promise((r) => { finishFirst = () => r({ ok: true, status: 200, json: async () => ({ success: true }) }); });
+      }
+      return res({ success: true, files: 1 });
+    });
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Lift spool\.3mf, / }), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(teams).toEqual(['1']));
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Lift spool\.3mf, / }), { key: 'ArrowUp', altKey: true });
+    // The workspace switches: the first save's reload brings back workspace 2.
+    lib = { ...queueLib(), teamId: 2 };
+    finishFirst();
+    // The waiting save still says workspace 1, so the server refuses it instead of clearing workspace 2's order.
+    await waitFor(() => expect(teams).toEqual(['1', '1']));
+  });
+
   it('goes back to priority order after asking, once someone has placed a file', async () => {
     lib = queueLib();
     setup('/prints?view=queue');

@@ -20,7 +20,8 @@ export class PrintsError extends Error {
 let boundTeam: number | null = null;
 async function call<T = any>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (boundTeam != null && url !== '/api/prints/library') headers.set('X-CP-Prints-Team', String(boundTeam));
+  // A caller that names its workspace (a write queued before a switch) keeps it.
+  if (boundTeam != null && url !== '/api/prints/library' && !headers.has('X-CP-Prints-Team')) headers.set('X-CP-Prints-Team', String(boundTeam));
   const r = await apiFetch(url, { ...init, headers });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new PrintsError(body?.error || `Request failed (${r.status})`, r.status, body);
@@ -90,8 +91,11 @@ export function usePrints() {
     deleteFolder: (id: number, files?: number) => write(() => call(`/api/prints/folders/${id}${files !== undefined ? `?files=${files}` : ''}`, send('DELETE'))),
     updateFile: (id: number, patch: Record<string, unknown>) => write(() => call<PrintFile>(`/api/prints/files/${id}`, send('PATCH', patch))),
     bulk: (ids: number[], a: BulkAction) => write(() => call<{ files: number }>('/api/prints/files/bulk', send('POST', { ids, ...a }))),
-    /** Save the queue's order (the files still to print, next first); an empty list goes back to priority order. */
-    setQueueOrder: (ids: number[]) => write(() => call<{ files: number }>('/api/prints/queue', send('POST', { ids }))),
+    /**
+     * Save the queue's order (the files still to print, next first); an empty list goes back to priority order. `teamId`
+     * is the workspace the order was made in: a save that waited past a workspace switch is refused, not applied there.
+     */
+    setQueueOrder: (ids: number[], teamId: number) => write(() => call<{ files: number }>('/api/prints/queue', { ...send('POST', { ids }), headers: { 'X-CP-Prints-Team': String(teamId) } })),
     createCollection: (name: string) => write(() => call<{ id: number; name: string }>('/api/prints/collections', send('POST', { name }))),
     renameCollection: (id: number, name: string) => write(() => call(`/api/prints/collections/${id}`, send('PATCH', { name }))),
     deleteCollection: (id: number) => write(() => call(`/api/prints/collections/${id}`, send('DELETE'))),

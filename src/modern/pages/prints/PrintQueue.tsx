@@ -44,7 +44,9 @@ export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce,
    */
   const saveOrder = (ids: number[]) => {
     const seq = ++saving.current;
-    const run = saves.current.then(() => (seq === saving.current ? prints.setQueueOrder(ids).then(() => {}) : undefined));
+    // The workspace this order belongs to, fixed now: a save still waiting after a switch is refused there.
+    const team = lib.teamId;
+    const run = saves.current.then(() => (seq === saving.current ? prints.setQueueOrder(ids, team).then(() => {}) : undefined));
     saves.current = run.catch(() => {});
     return run.finally(() => { if (saving.current === seq) setPending(null); });
   };
