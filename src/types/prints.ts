@@ -39,6 +39,21 @@ export const isPrintStatus = (v: unknown): v is PrintStatus => typeof v === 'str
 /** Statuses that still need a print. */
 export const stillToPrint = (s: PrintStatus) => s === 'to_print' || s === 'failed';
 
+export type PrintPriority = 'urgent' | 'high' | 'normal' | 'low';
+/** Most pressing first. */
+export const PRINT_PRIORITIES: readonly PrintPriority[] = ['urgent', 'high', 'normal', 'low'];
+export const PRIORITY_LABELS: Record<PrintPriority, string> = { urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' };
+export const isPrintPriority = (v: unknown): v is PrintPriority => typeof v === 'string' && (PRINT_PRIORITIES as readonly string[]).includes(v);
+
+/** A due date as stored: "YYYY-MM-DD" for a real day, null for none, undefined when it can't be one. */
+export function cleanDueDate(raw: unknown): string | null | undefined {
+  if (raw === null || raw === '') return null;
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return undefined;
+  const [y, m, d] = raw.split('-').map(Number);
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return y >= 2000 && y <= 2100 && day.getUTCMonth() === m - 1 && day.getUTCDate() === d ? raw : undefined;
+}
+
 /** Materials offered first; any other short name is kept as typed. */
 export const PRINT_MATERIALS = ['PLA', 'PETG', 'TPU', 'ABS', 'ASA', 'Nylon', 'PC', 'CF Nylon', 'Resin'] as const;
 
@@ -150,6 +165,11 @@ export interface PrintFile {
   copiesNeeded: number | null;
   copiesNeededFrom: 'manual' | 'cad' | null;
   copiesPrinted: number;
+  priority: PrintPriority;
+  /** "YYYY-MM-DD", or null. */
+  dueDate: string | null;
+  /** Where a person placed it in the queue (1 is next), or null when it slots in by priority and due date. */
+  queuePos: number | null;
   collections: number[];
   hasThumb: boolean;
   source: 'upload' | 'control-kit';
@@ -263,4 +283,64 @@ export function sortFiles(files: readonly PrintFile[], key: SortKey, dir: 'asc' 
     const d = key === 'size' ? a.size - b.size : key === 'date' ? a.updatedAt.localeCompare(b.updatedAt) : byName(a, b);
     return (d || byName(a, b) || a.id - b.id) * s;
   });
+}
+
+// ---------------------------------------------------------------------------
+// The print queue: what's printing now, then what's up next in the order the
+// team will print it.
+
+/** Most pressing first: priority, then the earlier due date (none last), then the older file. */
+export function byPriority(a: PrintFile, b: PrintFile): number {
+  return PRINT_PRIORITIES.indexOf(a.priority) - PRINT_PRIORITIES.indexOf(b.priority)
+    || (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999')
+    || a.createdAt.localeCompare(b.createdAt)
+    || a.id - b.id;
+}
+
+/**
+ * The files still to print (To print and Failed), next first. Files a person placed keep their order; the rest slot
+ * in by priority and due date, each before the first placed file it beats (an urgent new file goes to the top).
+ */
+export function queueOrder(files: readonly PrintFile[]): PrintFile[] {
+  const waiting = files.filter((f) => stillToPrint(f.status));
+  const placed = waiting.filter((f) => f.queuePos != null).sort((a, b) => a.queuePos! - b.queuePos! || a.id - b.id);
+  const loose = waiting.filter((f) => f.queuePos == null).sort(byPriority);
+  const out: PrintFile[] = [];
+  let i = 0;
+  for (const p of placed) {
+    while (i < loose.length && byPriority(loose[i], p) < 0) out.push(loose[i++]);
+    out.push(p);
+  }
+  return out.concat(loose.slice(i));
+}
+
+/** `ids` with `id` moved to `to` (an index in the list as it is now, clamped). */
+export function moveInOrder(ids: readonly number[], id: number, to: number): number[] {
+  const from = ids.indexOf(id);
+  if (from < 0) return [...ids];
+  const out = ids.filter((x) => x !== id);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, id);
+  return out;
+}
+
+/** Today in the viewer's time zone, "YYYY-MM-DD". */
+export function localDay(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** How a due date stands against `today`: past, today, within the next 3 days, or later. */
+export function dueState(due: string | null, today = localDay()): 'overdue' | 'today' | 'soon' | 'later' | null {
+  if (!due) return null;
+  if (due < today) return 'overdue';
+  if (due === today) return 'today';
+  const [y, m, d] = today.split('-').map(Number);
+  return due <= localDay(new Date(y, m - 1, d + 3)) ? 'soon' : 'later';
+}
+
+/** "Due Nov 3", "Due today", "Overdue · Oct 28" (the year when it isn't this one). */
+export function dueText(due: string, today = localDay()): string {
+  const [y, m, d] = due.split('-').map(Number);
+  const day = new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(String(y) !== today.slice(0, 4) ? { year: 'numeric' } : {}) });
+  const s = dueState(due, today);
+  return s === 'overdue' ? `Overdue · ${day}` : s === 'today' ? 'Due today' : `Due ${day}`;
 }

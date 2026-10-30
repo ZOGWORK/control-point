@@ -7,7 +7,7 @@
 // everything or mark a selection printed or failed.
 //
 // The view lives in the URL (?folder=, ?status=, ?sub=, ?mat=, ?robot=,
-// ?season=, ?col=, ?q=), so a group can be linked and Back works.
+// ?season=, ?col=, ?q=, ?view=queue), so a group can be linked and Back works.
 import React, { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -23,11 +23,12 @@ import { confirmDialog, notify } from '../../../components/dialog';
 import { fmtDate } from '../../../components/cad/useCad';
 import { seasonName } from '../../../types/cadBom';
 import {
-  FILTER_KEYS, PRINT_ACCEPT, STATUS_LABELS, canPreview, folderAndBelow, folderTrail, formatBytes, groupCounts, hasGroupFilter, isPrintStatus,
-  matchesFilters, sortFiles, type FilterKey, type PrintFile, type PrintFilters, type PrintFolder, type PrintLibrary, type PrintStatus, type SortKey,
+  FILTER_KEYS, PRINT_ACCEPT, PRIORITY_LABELS, STATUS_LABELS, canPreview, folderAndBelow, folderTrail, formatBytes, groupCounts, hasGroupFilter, isPrintStatus,
+  matchesFilters, sortFiles, stillToPrint, type FilterKey, type PrintFile, type PrintFilters, type PrintFolder, type PrintLibrary, type PrintStatus, type SortKey,
 } from '../../../types/prints';
 import { EmptyState, Page, PageHeader } from '../../ui/page';
 import { PrintDetails } from './PrintDetails';
+import { PrintQueue, queueSummary } from './PrintQueue';
 import { PrintsSidebar, type DropHandlers } from './PrintsSidebar';
 import { FileArt, FolderArt, MoveDialog, NameDialog, StatusChip, copiesText } from './printsUi';
 import { download, downloadFiles, fileUrl, folderZipUrl, thumbnailFor, usePrints, type UploadItem } from './usePrints';
@@ -75,7 +76,8 @@ export function PrintsPage() {
   const filters = useMemo(() => readFilters(params), [params]);
   const folderParam = Number(params.get('folder'));
   const folderId = lib && Number.isInteger(folderParam) && lib.folders.some((f) => f.id === folderParam) ? folderParam : null;
-  const groupMode = hasGroupFilter(filters) || !!filters.query?.trim();
+  const queueMode = params.get('view') === 'queue';
+  const groupMode = !queueMode && (hasGroupFilter(filters) || !!filters.query?.trim());
   const [view, setView] = useState<'list' | 'grid'>(() => { try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'list'; } catch { return 'list'; } });
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
@@ -91,9 +93,10 @@ export function PrintsPage() {
   useEffect(() => { try { localStorage.setItem(VIEW_KEY, view); } catch { /* storage off */ } }, [view]);
   useEffect(() => { setQuery(filters.query ?? ''); }, [filters.query]);
 
-  const go = useCallback((next: { folder?: number | null; filters?: PrintFilters }) => {
+  const go = useCallback((next: { folder?: number | null; filters?: PrintFilters; queue?: boolean }) => {
     setParams(() => {
       const p = new URLSearchParams();
+      if (next.queue) p.set('view', 'queue');
       if (next.folder != null) p.set('folder', String(next.folder));
       const f = next.filters ?? {};
       for (const k of [...FILTER_KEYS, 'query'] as const) { const v = f[k]; if (v !== undefined && v !== '') p.set(PARAM[k], String(v)); }
@@ -102,6 +105,7 @@ export function PrintsPage() {
     setSelected(new Set());
   }, [setParams]);
   const openFolder = (id: number | null) => { go({ folder: id }); setBrowseOpen(false); };
+  const openQueue = () => { go({ queue: true }); setBrowseOpen(false); };
   const toggle = <K extends FilterKey>(key: K, value: PrintFilters[K]) => {
     const same = key === 'subsystem' || key === 'material'
       ? String(filters[key] ?? '').toLowerCase() === String(value).toLowerCase()
@@ -135,8 +139,8 @@ export function PrintsPage() {
   const counts = groupCounts(shown.files);
   const label = lib && groupMode ? (filterLabel(filters, lib) || `Search “${filters.query}”`) : null;
   const trail = lib ? folderTrail(lib.folders, folderId) : [];
-  const here = groupMode ? label! : trail.length ? trail[trail.length - 1].name : 'All prints';
-  const summary = `${plural(counts.files, 'file')}${counts.files ? (counts.stillToPrint ? ` · ${counts.stillToPrint} still to print` : ' · all printed or printing') : ''}`;
+  const here = queueMode ? 'Print queue' : groupMode ? label! : trail.length ? trail[trail.length - 1].name : 'All prints';
+  const summary = queueMode && lib ? queueSummary(lib.files) : `${plural(counts.files, 'file')}${counts.files ? (counts.stillToPrint ? ` · ${counts.stillToPrint} still to print` : ' · all printed or printing') : ''}`;
   useEffect(() => { if (lib) setAnnounce(`${here}: ${summary}`); }, [here, summary, lib]);
   const filesBelow = useMemo(() => (lib && !groupMode ? (folderId == null ? lib.files.length : lib.files.filter((f) => f.folderId != null && folderAndBelow(lib.folders, folderId).has(f.folderId)).length) : 0), [lib, groupMode, folderId]);
   // Selection never holds files that left the view.
@@ -318,7 +322,7 @@ export function PrintsPage() {
   if (!lib) return <Page><PageHeader eyebrow="Build" title="Prints" /><EmptyState icon={Printer} title="Couldn't load your prints" description="Check your connection and refresh the page." /></Page>;
 
   const sidebar = (
-    <PrintsSidebar lib={lib} folderId={folderId} filters={filters} groupMode={groupMode} onFolder={openFolder} onToggle={toggle} drop={drop}
+    <PrintsSidebar lib={lib} folderId={folderId} filters={filters} groupMode={groupMode} queueMode={queueMode} onQueue={openQueue} onFolder={openFolder} onToggle={toggle} drop={drop}
       onNewCollection={() => newCollection()} onRenameCollection={renameCollection} onDeleteCollection={(id) => void deleteCollection(id)} />
   );
   const usedPct = Math.min(100, Math.round((lib.usage.used / Math.max(1, lib.usage.quota)) * 100));
@@ -373,7 +377,7 @@ export function PrintsPage() {
   );
   const folderCount = (f: PrintFolder) => { const inside = folderAndBelow(lib.folders, f.id); return lib.files.filter((x) => x.folderId != null && inside.has(x.folderId)).length; };
   const where = (f: PrintFile) => { const t = folderTrail(lib.folders, f.folderId); return t.length ? t.map((x) => x.name).join(' / ') : 'Top level'; };
-  const meta = (f: PrintFile) => [f.subsystem, f.material, copiesText(f)].filter(Boolean).join(' · ');
+  const meta = (f: PrintFile) => [f.subsystem, f.material, copiesText(f), f.priority !== 'normal' && stillToPrint(f.status) ? `${PRIORITY_LABELS[f.priority]} priority` : null].filter(Boolean).join(' · ');
 
   return (
     <Page fullBleed className="mx-auto max-w-[1400px]">
@@ -381,7 +385,7 @@ export function PrintsPage() {
         description="Every 3D print file in one library: folders for where a file lives, groups for how you think about it. One file can sit in many groups without a copy."
         actions={canEdit ? (
           <>
-            <Button variant="outline" onClick={newFolder} disabled={groupMode}><FolderPlus /> New folder</Button>
+            <Button variant="outline" onClick={newFolder} disabled={groupMode || queueMode}><FolderPlus /> New folder</Button>
             <Button onClick={() => fileInput.current?.click()}><Upload /> Upload</Button>
           </>
         ) : undefined} />
@@ -401,200 +405,206 @@ export function PrintsPage() {
           </div>
         </aside>
 
-        <section aria-label={here} className={cn('min-w-0 rounded-2xl', over === mainDropKey(groupMode, folderId) && 'ring-2 ring-accent ring-offset-4 ring-offset-background')} {...mainDrop} onKeyDown={onListKey}>
-          {/* Location: the folder path, or the groups picked. */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" className="h-10 md:hidden" onClick={() => setBrowseOpen(true)}><ListFilter /> Folders and groups</Button>
-            {groupMode ? (
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {activeChips.map((k) => (
-                  <span key={k} className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-0.5 pl-2.5 pr-1 text-sm">
-                    {filterLabel({ [k]: filters[k] } as PrintFilters, lib)}
-                    <button type="button" className="flex size-7 items-center justify-center rounded-full hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 md:size-5"
-                      aria-label={`Remove ${filterLabel({ [k]: filters[k] } as PrintFilters, lib)}`} onClick={() => go({ filters: { ...filters, [k]: undefined } })}><X className="size-3.5" /></button>
-                  </span>
-                ))}
-                <Button variant="ghost" size="sm" onClick={() => go({})}>Clear</Button>
-              </div>
-            ) : (
-              <nav aria-label="Folder path" className="min-w-0">
-                <ol className="flex flex-wrap items-center gap-0.5 text-sm">
-                  <li {...drop.target('folder:root', { folders: true, os: true })}>
-                    <button type="button" onClick={() => openFolder(null)} aria-current={folderId === null ? 'page' : undefined}
-                      className={cn('rounded-md px-1.5 py-1 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60', folderId === null ? 'font-semibold' : 'text-muted-foreground', over === 'folder:root' && 'ring-2 ring-accent')}>
-                      All prints
-                    </button>
-                  </li>
-                  {trail.map((f, i) => (
-                    <li key={f.id} className="flex items-center gap-0.5" {...drop.target(`folder:${f.id}`, { folders: true, os: true })}>
-                      <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
-                      <button type="button" onClick={() => openFolder(f.id)} aria-current={i === trail.length - 1 ? 'page' : undefined}
-                        className={cn('max-w-[14rem] truncate rounded-md px-1.5 py-1 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60', i === trail.length - 1 ? 'font-semibold' : 'text-muted-foreground', over === `folder:${f.id}` && 'ring-2 ring-accent')}>
-                        {f.name}
+        {queueMode ? (
+          // Upload stays in the header here, so its progress and errors show here too.
+          <PrintQueue lib={lib} prints={prints} onOpen={setDetailsId} onStatus={setStatus} onError={fail} onAnnounce={setAnnounce} onBrowse={() => setBrowseOpen(true)}
+            uploads={uploads.length > 0 ? <UploadPanel items={uploads} onClose={() => setUploads([])} /> : null} />
+        ) : (
+          <section aria-label={here} className={cn('min-w-0 rounded-2xl', over === mainDropKey(groupMode, folderId) && 'ring-2 ring-accent ring-offset-4 ring-offset-background')} {...mainDrop} onKeyDown={onListKey}>
+            {/* Location: the folder path, or the groups picked. */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" className="h-10 md:hidden" onClick={() => setBrowseOpen(true)}><ListFilter /> Folders and groups</Button>
+              {groupMode ? (
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {activeChips.map((k) => (
+                    <span key={k} className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 py-0.5 pl-2.5 pr-1 text-sm">
+                      {filterLabel({ [k]: filters[k] } as PrintFilters, lib)}
+                      <button type="button" className="flex size-7 items-center justify-center rounded-full hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 md:size-5"
+                        aria-label={`Remove ${filterLabel({ [k]: filters[k] } as PrintFilters, lib)}`} onClick={() => go({ filters: { ...filters, [k]: undefined } })}><X className="size-3.5" /></button>
+                    </span>
+                  ))}
+                  <Button variant="ghost" size="sm" onClick={() => go({})}>Clear</Button>
+                </div>
+              ) : (
+                <nav aria-label="Folder path" className="min-w-0">
+                  <ol className="flex flex-wrap items-center gap-0.5 text-sm">
+                    <li {...drop.target('folder:root', { folders: true, os: true })}>
+                      <button type="button" onClick={() => openFolder(null)} aria-current={folderId === null ? 'page' : undefined}
+                        className={cn('rounded-md px-1.5 py-1 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60', folderId === null ? 'font-semibold' : 'text-muted-foreground', over === 'folder:root' && 'ring-2 ring-accent')}>
+                        All prints
                       </button>
                     </li>
-                  ))}
-                </ol>
-              </nav>
-            )}
-          </div>
-
-          {/* Toolbar */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[12rem] flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the library" aria-label="Search the library" className="h-10 pl-9" />
-            </div>
-            <label className="sr-only" htmlFor="prints-sort">Sort by</label>
-            <select id="prints-sort" value={sort.key} onChange={(e) => setSort((s) => ({ ...s, key: e.target.value as SortKey }))}
-              className="h-10 rounded-lg border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-              <option value="name">Name</option><option value="date">Date changed</option><option value="size">Size</option>
-            </select>
-            <Button variant="outline" size="icon" className="size-10" onClick={() => setSort((s) => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}
-              aria-label={sort.dir === 'asc' ? 'Ascending; switch to descending' : 'Descending; switch to ascending'}><ArrowDownUp className={cn("size-4", sort.dir === "desc" && "rotate-180")} /></Button>
-            <div role="group" aria-label="View" className="flex rounded-lg border border-border p-0.5">
-              <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="icon" className="size-9" aria-pressed={view === 'list'} aria-label="List view" onClick={() => setView('list')}><List /></Button>
-              <Button variant={view === 'grid' ? 'secondary' : 'ghost'} size="icon" className="size-9" aria-pressed={view === 'grid'} aria-label="Grid view" onClick={() => setView('grid')}><LayoutGrid /></Button>
-            </div>
-          </div>
-
-          {/* What this group or folder holds */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="min-w-0 text-base font-semibold">
-              <span className="break-words">{here}</span>{' '}
-              <span className="font-normal text-muted-foreground">· {summary}</span>
-            </h2>
-            <Button variant="outline" size="sm" className="h-10 md:h-8" onClick={downloadAll} disabled={groupMode ? !shown.files.length : !filesBelow}><Download /> Download all</Button>
-          </div>
-
-          {selected.size > 0 && (
-            <div role="toolbar" aria-label="Selected files" className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-elevated p-2 shadow-lg">
-              <span className="px-2 text-sm font-medium">{selected.size} selected</span>
-              {canEdit && <Button size="sm" className="h-10 md:h-8" onClick={() => void setStatus([...selected], 'printed')}><Check /> Printed</Button>}
-              {canEdit && <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => void setStatus([...selected], 'failed')}><XCircle /> Failed</Button>}
-              {canEdit && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild><Button size="sm" variant="outline" className="h-10 md:h-8"><Tag /> Group…</Button></DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-56">
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">Mark as</DropdownMenuLabel>
-                    {(['to_print', 'printing'] as const).map((s) => <DropdownMenuItem key={s} onSelect={() => void setStatus([...selected], s)}>{STATUS_LABELS[s]}</DropdownMenuItem>)}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">Add to collection</DropdownMenuLabel>
-                    {lib.collections.map((c) => <DropdownMenuItem key={c.id} onSelect={() => void collect([...selected], c.id)}>{c.name}</DropdownMenuItem>)}
-                    <DropdownMenuItem onSelect={() => newCollection([...selected])}>New collection…</DropdownMenuItem>
-                    {filters.collection !== undefined && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onSelect={() => void collect([...selected], filters.collection!, false)}>Remove from {lib.collections.find((c) => c.id === filters.collection)?.name}</DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    {trail.map((f, i) => (
+                      <li key={f.id} className="flex items-center gap-0.5" {...drop.target(`folder:${f.id}`, { folders: true, os: true })}>
+                        <ChevronRight className="size-3.5 text-muted-foreground" aria-hidden />
+                        <button type="button" onClick={() => openFolder(f.id)} aria-current={i === trail.length - 1 ? 'page' : undefined}
+                          className={cn('max-w-[14rem] truncate rounded-md px-1.5 py-1 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60', i === trail.length - 1 ? 'font-semibold' : 'text-muted-foreground', over === `folder:${f.id}` && 'ring-2 ring-accent')}>
+                          {f.name}
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                </nav>
               )}
-              {canEdit && <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => moveFiles([...selected])}><FolderInput /> Move to…</Button>}
-              <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => downloadFiles([...selected], selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : label || here).catch(fail)}><Download /> Download</Button>
-              {canEdit && <Button size="sm" variant="outline" className="h-10 text-destructive md:h-8" onClick={() => void deleteFiles([...selected])}><Trash2 className="size-4" /> Delete</Button>}
-              <Button size="sm" variant="ghost" className="ml-auto h-10 md:h-8" onClick={() => setSelected(new Set())}>Clear</Button>
             </div>
-          )}
 
-          {uploads.length > 0 && <UploadPanel items={uploads} onClose={() => setUploads([])} />}
-
-          {shown.folders.length === 0 && shown.files.length === 0 ? (
-            groupMode
-              ? <EmptyState icon={ListFilter} title="Nothing in this group" description="No file matches every group picked. Remove one to see more." action={<Button variant="outline" onClick={() => go({})}>Clear groups</Button>} />
-              : <EmptyState icon={Printer} title={folderId == null ? 'No prints yet' : 'This folder is empty'}
-                  description={canEdit ? 'Drop STL, 3MF, STEP, OBJ or G-code files here, or upload them. Control Kit files its parts to print here too.' : 'Files your team uploads show up here.'}
-                  action={canEdit ? <Button onClick={() => fileInput.current?.click()}><Upload /> Upload files</Button> : undefined} />
-          ) : view === 'list' ? (
-            <div className="overflow-hidden rounded-xl border border-border">
-              <div className="hidden items-center gap-3 border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground md:flex">
-                <Checkbox aria-label={allSelected ? 'Clear the selection' : 'Select every file shown'} checked={allSelected} onCheckedChange={(v) => setSelected(v ? new Set(shown.files.map((f) => f.id)) : new Set())} disabled={!shown.files.length} />
-                <span className="w-9" aria-hidden />
-                <span className="flex-1">Name</span>
-                <span className="w-36">Status</span>
-                <span className="w-20 text-right">Size</span>
-                <span className="w-28">Changed</span>
-                <span className="w-8" aria-hidden />
+            {/* Toolbar */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[12rem] flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the library" aria-label="Search the library" className="h-10 pl-9" />
               </div>
-              <ul aria-label={`Contents of ${here}`}>
+              <label className="sr-only" htmlFor="prints-sort">Sort by</label>
+              <select id="prints-sort" value={sort.key} onChange={(e) => setSort((s) => ({ ...s, key: e.target.value as SortKey }))}
+                className="h-10 rounded-lg border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                <option value="name">Name</option><option value="date">Date changed</option><option value="size">Size</option>
+              </select>
+              <Button variant="outline" size="icon" className="size-10" onClick={() => setSort((s) => ({ ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}
+                aria-label={sort.dir === 'asc' ? 'Ascending; switch to descending' : 'Descending; switch to ascending'}><ArrowDownUp className={cn("size-4", sort.dir === "desc" && "rotate-180")} /></Button>
+              <div role="group" aria-label="View" className="flex rounded-lg border border-border p-0.5">
+                <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="icon" className="size-9" aria-pressed={view === 'list'} aria-label="List view" onClick={() => setView('list')}><List /></Button>
+                <Button variant={view === 'grid' ? 'secondary' : 'ghost'} size="icon" className="size-9" aria-pressed={view === 'grid'} aria-label="Grid view" onClick={() => setView('grid')}><LayoutGrid /></Button>
+              </div>
+            </div>
+
+            {/* What this group or folder holds */}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="min-w-0 text-base font-semibold">
+                <span className="break-words">{here}</span>{' '}
+                <span className="font-normal text-muted-foreground">· {summary}</span>
+              </h2>
+              <Button variant="outline" size="sm" className="h-10 md:h-8" onClick={downloadAll} disabled={groupMode ? !shown.files.length : !filesBelow}><Download /> Download all</Button>
+            </div>
+
+            {selected.size > 0 && (
+              <div role="toolbar" aria-label="Selected files" className="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-elevated p-2 shadow-lg">
+                <span className="px-2 text-sm font-medium">{selected.size} selected</span>
+                {canEdit && <Button size="sm" className="h-10 md:h-8" onClick={() => void setStatus([...selected], 'printed')}><Check /> Printed</Button>}
+                {canEdit && <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => void setStatus([...selected], 'failed')}><XCircle /> Failed</Button>}
+                {canEdit && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button size="sm" variant="outline" className="h-10 md:h-8"><Tag /> Group…</Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">Mark as</DropdownMenuLabel>
+                      {(['to_print', 'printing'] as const).map((s) => <DropdownMenuItem key={s} onSelect={() => void setStatus([...selected], s)}>{STATUS_LABELS[s]}</DropdownMenuItem>)}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel className="text-xs text-muted-foreground">Add to collection</DropdownMenuLabel>
+                      {lib.collections.map((c) => <DropdownMenuItem key={c.id} onSelect={() => void collect([...selected], c.id)}>{c.name}</DropdownMenuItem>)}
+                      <DropdownMenuItem onSelect={() => newCollection([...selected])}>New collection…</DropdownMenuItem>
+                      {filters.collection !== undefined && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => void collect([...selected], filters.collection!, false)}>Remove from {lib.collections.find((c) => c.id === filters.collection)?.name}</DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                {canEdit && <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => moveFiles([...selected])}><FolderInput /> Move to…</Button>}
+                <Button size="sm" variant="outline" className="h-10 md:h-8" onClick={() => downloadFiles([...selected], selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : label || here).catch(fail)}><Download /> Download</Button>
+                {canEdit && <Button size="sm" variant="outline" className="h-10 text-destructive md:h-8" onClick={() => void deleteFiles([...selected])}><Trash2 className="size-4" /> Delete</Button>}
+                <Button size="sm" variant="ghost" className="ml-auto h-10 md:h-8" onClick={() => setSelected(new Set())}>Clear</Button>
+              </div>
+            )}
+
+            {uploads.length > 0 && <UploadPanel items={uploads} onClose={() => setUploads([])} />}
+
+            {shown.folders.length === 0 && shown.files.length === 0 ? (
+              groupMode
+                ? <EmptyState icon={ListFilter} title="Nothing in this group" description="No file matches every group picked. Remove one to see more." action={<Button variant="outline" onClick={() => go({})}>Clear groups</Button>} />
+                : <EmptyState icon={Printer} title={folderId == null ? 'No prints yet' : 'This folder is empty'}
+                    description={canEdit ? 'Drop STL, 3MF, STEP, OBJ or G-code files here, or upload them. Control Kit files its parts to print here too.' : 'Files your team uploads show up here.'}
+                    action={canEdit ? <Button onClick={() => fileInput.current?.click()}><Upload /> Upload files</Button> : undefined} />
+            ) : view === 'list' ? (
+              <div className="overflow-hidden rounded-xl border border-border">
+                <div className="hidden items-center gap-3 border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground md:flex">
+                  <Checkbox aria-label={allSelected ? 'Clear the selection' : 'Select every file shown'} checked={allSelected} onCheckedChange={(v) => setSelected(v ? new Set(shown.files.map((f) => f.id)) : new Set())} disabled={!shown.files.length} />
+                  <span className="w-9" aria-hidden />
+                  <span className="flex-1">Name</span>
+                  <span className="w-36">Status</span>
+                  <span className="w-20 text-right">Size</span>
+                  <span className="w-28">Changed</span>
+                  <span className="w-8" aria-hidden />
+                </div>
+                <ul aria-label={`Contents of ${here}`}>
+                  {shown.folders.map((f) => (
+                    <li key={`d${f.id}`} draggable={canEdit} onDragStart={dragFolder(f)} {...drop.target(`folder:${f.id}`, { folders: true, os: true })}
+                      className={cn('flex items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0 hover:bg-muted/40', over === `folder:${f.id}` && 'bg-accent/10 ring-2 ring-inset ring-accent')}>
+                      <span className="hidden w-4 md:block" aria-hidden />
+                      <FolderArt className="size-9 shrink-0 p-1.5" />
+                      <button type="button" onClick={() => openFolder(f.id)} data-row-main="1" onKeyDown={onFolderKey(f)}
+                        className="min-h-11 min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                        <span className="block truncate text-sm font-medium">{f.name}</span>
+                        <span className="block text-xs text-muted-foreground">{groupMode ? `Folder in ${folderTrail(lib.folders, f.parentId).map((x) => x.name).join(' / ') || 'Top level'}` : `Folder · ${plural(folderCount(f), 'file')}`}</span>
+                      </button>
+                      <span className="hidden w-36 md:block" />
+                      <span className="hidden w-20 md:block" />
+                      <span className="hidden w-28 text-xs text-muted-foreground md:block">{fmtDate(f.updatedAt)}</span>
+                      {folderMenu(f)}
+                    </li>
+                  ))}
+                  {shown.files.map((f) => (
+                    <li key={f.id} draggable={canEdit} onDragStart={dragFiles(f)} onKeyDown={onFileKey(f)}
+                      className={cn('flex items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0 hover:bg-muted/40', selected.has(f.id) && 'bg-accent/[0.07]')}>
+                      <Checkbox aria-label={`Select ${f.name}`} checked={selected.has(f.id)} className="max-md:size-5"
+                        onCheckedChange={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(f.id); else n.delete(f.id); return n; })} />
+                      <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#1b1b1f]"><FileArt file={f} className="size-full" /></span>
+                      <button type="button" data-row-main="1" onClick={() => setDetailsId(f.id)}
+                        className="min-h-11 min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                        <span className="block truncate text-sm font-medium">{f.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          <span className="md:hidden">{STATUS_LABELS[f.status]} · {formatBytes(f.size)}{meta(f) ? ' · ' : ''}</span>
+                          {groupMode ? `${where(f)}${meta(f) ? ' · ' : ''}` : ''}{meta(f)}
+                        </span>
+                      </button>
+                      <span className="hidden w-36 md:block"><StatusChip status={f.status} /></span>
+                      <span className="hidden w-20 text-right text-xs tabular-nums text-muted-foreground md:block">{formatBytes(f.size)}</span>
+                      <span className="hidden w-28 text-xs text-muted-foreground md:block">{fmtDate(f.updatedAt)}</span>
+                      {fileMenu(f)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <ul aria-label={`Contents of ${here}`} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
                 {shown.folders.map((f) => (
                   <li key={`d${f.id}`} draggable={canEdit} onDragStart={dragFolder(f)} {...drop.target(`folder:${f.id}`, { folders: true, os: true })}
-                    className={cn('flex items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0 hover:bg-muted/40', over === `folder:${f.id}` && 'bg-accent/10 ring-2 ring-inset ring-accent')}>
-                    <span className="hidden w-4 md:block" aria-hidden />
-                    <FolderArt className="size-9 shrink-0 p-1.5" />
-                    <button type="button" onClick={() => openFolder(f.id)} data-row-main="1" onKeyDown={onFolderKey(f)}
-                      className="min-h-11 min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-                      <span className="block truncate text-sm font-medium">{f.name}</span>
-                      <span className="block text-xs text-muted-foreground">{groupMode ? `Folder in ${folderTrail(lib.folders, f.parentId).map((x) => x.name).join(' / ') || 'Top level'}` : `Folder · ${plural(folderCount(f), 'file')}`}</span>
+                    className={cn('group relative flex flex-col rounded-xl border border-border bg-card p-3 transition-colors hover:border-accent/40', over === `folder:${f.id}` && 'border-accent ring-2 ring-accent')}>
+                    <button type="button" onClick={() => openFolder(f.id)} onKeyDown={onFolderKey(f)} className="flex flex-col items-start gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                      <FolderArt className="size-10" />
+                      <span className="line-clamp-2 break-words text-sm font-medium">{f.name}</span>
+                      <span className="text-xs text-muted-foreground">{plural(folderCount(f), 'file')}</span>
                     </button>
-                    <span className="hidden w-36 md:block" />
-                    <span className="hidden w-20 md:block" />
-                    <span className="hidden w-28 text-xs text-muted-foreground md:block">{fmtDate(f.updatedAt)}</span>
-                    {folderMenu(f)}
+                    <span className="absolute right-1.5 top-1.5">{folderMenu(f)}</span>
                   </li>
                 ))}
                 {shown.files.map((f) => (
                   <li key={f.id} draggable={canEdit} onDragStart={dragFiles(f)} onKeyDown={onFileKey(f)}
-                    className={cn('flex items-center gap-3 border-b border-border px-3 py-1.5 last:border-b-0 hover:bg-muted/40', selected.has(f.id) && 'bg-accent/[0.07]')}>
-                    <Checkbox aria-label={`Select ${f.name}`} checked={selected.has(f.id)} className="max-md:size-5"
-                      onCheckedChange={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(f.id); else n.delete(f.id); return n; })} />
-                    <span className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[#1b1b1f]"><FileArt file={f} className="size-full" /></span>
-                    <button type="button" data-row-main="1" onClick={() => setDetailsId(f.id)}
-                      className="min-h-11 min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-                      <span className="block truncate text-sm font-medium">{f.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        <span className="md:hidden">{STATUS_LABELS[f.status]} · {formatBytes(f.size)}{meta(f) ? ' · ' : ''}</span>
-                        {groupMode ? `${where(f)}${meta(f) ? ' · ' : ''}` : ''}{meta(f)}
+                    className={cn('group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-colors hover:border-accent/40', selected.has(f.id) ? 'border-accent' : 'border-border')}>
+                    <button type="button" data-row-main="1" onClick={() => setDetailsId(f.id)} className="flex flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
+                      <span className="flex aspect-square items-center justify-center bg-[#1b1b1f]"><FileArt file={f} size="lg" className="size-full p-2" /></span>
+                      <span className="p-3 pb-2">
+                        <span className="line-clamp-2 break-words text-sm font-medium">{f.name}</span>
+                        <span className="mt-0.5 block truncate text-xs text-muted-foreground">{meta(f) || formatBytes(f.size)}</span>
                       </span>
                     </button>
-                    <span className="hidden w-36 md:block"><StatusChip status={f.status} /></span>
-                    <span className="hidden w-20 text-right text-xs tabular-nums text-muted-foreground md:block">{formatBytes(f.size)}</span>
-                    <span className="hidden w-28 text-xs text-muted-foreground md:block">{fmtDate(f.updatedAt)}</span>
-                    {fileMenu(f)}
+                    <div className="mt-auto flex items-center justify-between gap-1 px-3 pb-2">
+                      <StatusChip status={f.status} />
+                      {fileMenu(f)}
+                    </div>
+                    <span className="absolute left-2 top-2 rounded-md bg-background/80 p-1 backdrop-blur-sm">
+                      <Checkbox aria-label={`Select ${f.name}`} checked={selected.has(f.id)} className="max-md:size-5"
+                        onCheckedChange={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(f.id); else n.delete(f.id); return n; })} />
+                    </span>
                   </li>
                 ))}
               </ul>
-            </div>
-          ) : (
-            <ul aria-label={`Contents of ${here}`} className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-              {shown.folders.map((f) => (
-                <li key={`d${f.id}`} draggable={canEdit} onDragStart={dragFolder(f)} {...drop.target(`folder:${f.id}`, { folders: true, os: true })}
-                  className={cn('group relative flex flex-col rounded-xl border border-border bg-card p-3 transition-colors hover:border-accent/40', over === `folder:${f.id}` && 'border-accent ring-2 ring-accent')}>
-                  <button type="button" onClick={() => openFolder(f.id)} onKeyDown={onFolderKey(f)} className="flex flex-col items-start gap-2 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
-                    <FolderArt className="size-10" />
-                    <span className="line-clamp-2 break-words text-sm font-medium">{f.name}</span>
-                    <span className="text-xs text-muted-foreground">{plural(folderCount(f), 'file')}</span>
-                  </button>
-                  <span className="absolute right-1.5 top-1.5">{folderMenu(f)}</span>
-                </li>
-              ))}
-              {shown.files.map((f) => (
-                <li key={f.id} draggable={canEdit} onDragStart={dragFiles(f)} onKeyDown={onFileKey(f)}
-                  className={cn('group relative flex flex-col overflow-hidden rounded-xl border bg-card transition-colors hover:border-accent/40', selected.has(f.id) ? 'border-accent' : 'border-border')}>
-                  <button type="button" data-row-main="1" onClick={() => setDetailsId(f.id)} className="flex flex-col text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/60">
-                    <span className="flex aspect-square items-center justify-center bg-[#1b1b1f]"><FileArt file={f} size="lg" className="size-full p-2" /></span>
-                    <span className="p-3 pb-2">
-                      <span className="line-clamp-2 break-words text-sm font-medium">{f.name}</span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">{meta(f) || formatBytes(f.size)}</span>
-                    </span>
-                  </button>
-                  <div className="mt-auto flex items-center justify-between gap-1 px-3 pb-2">
-                    <StatusChip status={f.status} />
-                    {fileMenu(f)}
-                  </div>
-                  <span className="absolute left-2 top-2 rounded-md bg-background/80 p-1 backdrop-blur-sm">
-                    <Checkbox aria-label={`Select ${f.name}`} checked={selected.has(f.id)} className="max-md:size-5"
-                      onCheckedChange={(v) => setSelected((s) => { const n = new Set(s); if (v) n.add(f.id); else n.delete(f.id); return n; })} />
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {canEdit && (shown.files.length > 0 || shown.folders.length > 0) && (
-            <p className="mt-3 hidden text-xs text-muted-foreground md:block">Drop files here to upload. Drag files onto a folder to move them, or onto a collection to add them. Delete removes, F2 renames, Ctrl+A selects all.</p>
-          )}
-        </section>
+            )}
+            {canEdit && (shown.files.length > 0 || shown.folders.length > 0) && (
+              <p className="mt-3 hidden text-xs text-muted-foreground md:block">Drop files here to upload. Drag files onto a folder to move them, or onto a collection to add them. Delete removes, F2 renames, Ctrl+A selects all.</p>
+            )}
+          </section>
+        )}
       </div>
 
       <Sheet open={browseOpen} onOpenChange={setBrowseOpen}>

@@ -19,6 +19,11 @@
 //
 // Control Kit: fileControlKitPrint() files a print sent for a robot under
 // "Season / Robot / Control Kit" (see the end of this file).
+//
+// The queue (migration 156): each file has a priority and an optional due
+// date, and the files still to print can be dragged into an order the whole
+// workspace shares (POST /api/prints/queue). See queueOrder() in
+// src/types/prints.ts for how placed and unplaced files mix.
 import type { Express } from "express";
 import multer from "multer";
 import { createHash, randomBytes } from "node:crypto";
@@ -28,7 +33,7 @@ import path from "node:path";
 import { seasonName, isSeason } from "../src/types/cadBom.js";
 import { DEFAULT_SUBSYSTEMS, cleanSubsystems } from "../src/types/teamModules.js";
 import {
-  canPreview, cleanMaterial, cleanName, cleanSubsystem, isPrintStatus, printKind, safeName, uniqueName,
+  canPreview, cleanDueDate, cleanMaterial, cleanName, cleanSubsystem, isPrintPriority, isPrintStatus, printKind, safeName, uniqueName,
   type PrintFile, type PrintKind, type PrintStatus,
 } from "../src/types/prints.js";
 import { readZip, writeZip, uniqueZipNames, ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipReadEntry } from "./zipStream.js";
@@ -49,6 +54,7 @@ export const MANAGE_PRINTS = "manage_prints";
 const MB = 1024 * 1024;
 const THUMB_MAX = 512 * 1024;
 const MAX_BULK = 1000;
+const MAX_QUEUE = 5000;
 const MAX_COLLECTIONS = 60;
 const MAX_FOLDERS = 2000;
 const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -235,7 +241,9 @@ export function createPrints(deps: PrintDeps) {
       material: r.material || null, status: isPrintStatus(r.status) ? r.status : "to_print",
       copiesNeeded: r.copies_needed != null ? Number(r.copies_needed) : cadQty,
       copiesNeededFrom: r.copies_needed != null ? "manual" : cadQty != null ? "cad" : null,
-      copiesPrinted: Number(r.copies_printed) || 0, collections: collections.get(Number(r.id)) ?? [], hasThumb: !!r.thumb_key,
+      copiesPrinted: Number(r.copies_printed) || 0,
+      priority: isPrintPriority(r.priority) ? r.priority : "normal", dueDate: r.due_date || null, queuePos: r.queue_pos == null ? null : Number(r.queue_pos),
+      collections: collections.get(Number(r.id)) ?? [], hasThumb: !!r.thumb_key,
       source: r.source === "control-kit" ? "control-kit" : "upload",
     };
   }
@@ -512,7 +520,7 @@ export function createPrints(deps: PrintDeps) {
       } catch (e) { sendError(res, e, "file"); }
     });
 
-    // Details: name, folder, notes, robot/season, CAD part, subsystem, material, status, copies.
+    // Details: name, folder, notes, robot/season, CAD part, subsystem, material, status, copies, priority, due date.
     app.patch("/api/prints/files/:id", async (req, res) => {
       try {
         const a = await access(req, res, true); if (!a) return;
@@ -593,6 +601,17 @@ export function createPrints(deps: PrintDeps) {
             : row.cad_part_id ? Number((await dbGet("SELECT quantity FROM cad_parts WHERE id = ? AND team_id = ?", row.cad_part_id, a.teamId))?.quantity ?? NaN) : NaN;
           if (need != null && Number.isFinite(need) && need > Number(row.copies_printed)) set("copies_printed", need, "copiesPrinted");
         }
+        if (body.priority !== undefined) {
+          if (!isPrintPriority(body.priority)) return res.status(400).json({ error: "Priority is urgent, high, normal or low" });
+          set("priority", body.priority);
+        }
+        if (body.dueDate !== undefined) {
+          const due = cleanDueDate(body.dueDate);
+          if (due === undefined) return res.status(400).json({ error: "Pick a due date" });
+          set("due_date", due, "dueDate");
+        }
+        // A new priority or due date, or a finished print, gives up its place in the queue: it slots in again by priority.
+        if (row.queue_pos != null && (changes.priority !== undefined || changes.dueDate !== undefined || changes.status === "printed")) sets.push("queue_pos = NULL");
         if (!sets.length) return res.json(await oneFile(a.teamId, Number(row.id)));
         const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
         const stmts: Stmt[] = [{ sql: `UPDATE print_files SET ${sets.join(", ")}, updated_at = ? WHERE id = ? AND team_id = ? AND ${FOLDER_OK}`, args: [...args, now(), row.id, a.teamId, folderId, folderId, a.teamId] }];
@@ -667,12 +686,13 @@ export function createPrints(deps: PrintDeps) {
             const status: PrintStatus = body.status;
             for (const r of rows.filter((x) => x.status !== status)) {
               stmts.push({
-                // Marking printed counts every copy needed as printed (when the count is known).
+                // Marking printed counts every copy needed as printed (when the count is known), and gives up its queue place.
                 sql: `UPDATE print_files SET status = ?, updated_at = ?, copies_printed = CASE WHEN ? = 'printed'
                         THEN MAX(copies_printed, COALESCE(copies_needed, (SELECT p.quantity FROM cad_parts p WHERE p.id = print_files.cad_part_id AND p.team_id = print_files.team_id), copies_printed))
-                        ELSE copies_printed END
+                        ELSE copies_printed END,
+                        queue_pos = CASE WHEN ? = 'printed' THEN NULL ELSE queue_pos END
                       WHERE id = ? AND team_id = ?`,
-                args: [status, t, status, r.id, a.teamId],
+                args: [status, t, status, status, r.id, a.teamId],
               });
               stmts.push(logStmt(a.teamId, by, "status", { fileId: Number(r.id), folderId: r.folder_id ?? null, detail: { from: r.status, to: status } }));
             }
@@ -713,6 +733,28 @@ export function createPrints(deps: PrintDeps) {
         }
         res.json({ success: true, files: changed });
       } catch (e) { sendError(res, e, "bulk"); }
+    });
+
+    // The queue's order: the files still to print as the person left it, next first. Those files are placed 1, 2, 3…;
+    // every other file gives up its place and slots in by priority and due date. An empty list puts the whole queue
+    // back in priority order. The last order sent wins.
+    app.post("/api/prints/queue", async (req, res) => {
+      try {
+        const a = await access(req, res, true); if (!a) return;
+        if (!Array.isArray(req.body?.ids)) return res.status(400).json({ error: "Send the queue's order" });
+        const list = ids(req.body.ids);
+        if (list.length > MAX_QUEUE) return res.status(400).json({ error: `A queue holds at most ${MAX_QUEUE} files` });
+        const by = { id: a.auth.memberId, name: await memberName(a.auth.memberId) };
+        const order = JSON.stringify(list);
+        const [, placed] = await deps.dbBatchResults([
+          { sql: "UPDATE print_files SET queue_pos = NULL WHERE team_id = ? AND queue_pos IS NOT NULL", args: [a.teamId] },
+          // Only this workspace's files that still need printing take a place.
+          { sql: `UPDATE print_files SET queue_pos = (SELECT j.key + 1 FROM json_each(?) j WHERE j.value = print_files.id)
+                   WHERE team_id = ? AND status IN ('to_print', 'failed') AND id IN (SELECT value FROM json_each(?))`, args: [order, a.teamId, order] },
+          logStmt(a.teamId, by, list.length ? "queue_order" : "queue_reset", { detail: { files: list.length } }),
+        ]);
+        res.json({ success: true, files: placed.changes });
+      } catch (e) { sendError(res, e, "queue"); }
     });
 
     app.get("/api/prints/files/:id/download", async (req, res) => {

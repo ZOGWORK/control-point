@@ -15,7 +15,7 @@ import { PassThrough } from "node:stream";
 import { writeFileSync } from "node:fs";
 import { startTestServer, seedTeam, seedMember, type TestServer } from "./helpers/testServer";
 import { withSession } from "./helpers/session";
-import { cleanName, splitPath, uniqueName, printKind, safeName, matchesFilters, groupLine, folderAndBelow, type PrintFile } from "../../src/types/prints";
+import { cleanName, splitPath, uniqueName, printKind, safeName, matchesFilters, groupLine, folderAndBelow, queueOrder, moveInOrder, cleanDueDate, dueState, type PrintFile } from "../../src/types/prints";
 import { PrintStore, createPrints, controlKitPrintPath, printLimits, partForStepFile } from "../prints";
 import { createHash } from "node:crypto";
 import { seasonName } from "../../src/types/cadBom";
@@ -133,7 +133,7 @@ describe("names, paths and storage keys (pure)", () => {
     expect(printLimits({ PRINTS_MAX_FILE_MB: "50", PRINTS_QUOTA_MB: "-1", PRINTS_MIN_FREE_MB: "0" })).toEqual({ maxFile: 50 * MB, quota: 2048 * MB, minFree: 0 });
   });
   it("combines group filters and counts what's left to print", () => {
-    const f = (o: Partial<PrintFile>): PrintFile => ({ id: 1, folderId: null, name: "x.stl", kind: "stl", size: 1, createdAt: "", updatedAt: "", uploadedBy: null, notes: "", robotId: null, season: null, cadPart: null, subsystem: null, subsystemFrom: null, material: null, status: "to_print", copiesNeeded: null, copiesNeededFrom: null, copiesPrinted: 0, collections: [], hasThumb: false, source: "upload", ...o });
+    const f = (o: Partial<PrintFile>): PrintFile => ({ id: 1, folderId: null, name: "x.stl", kind: "stl", size: 1, createdAt: "", updatedAt: "", uploadedBy: null, notes: "", robotId: null, season: null, cadPart: null, subsystem: null, subsystemFrom: null, material: null, status: "to_print", copiesNeeded: null, copiesNeededFrom: null, copiesPrinted: 0, priority: "normal", dueDate: null, queuePos: null, collections: [], hasThumb: false, source: "upload", ...o });
     const files = [f({ subsystem: "Intake", material: "PETG" }), f({ subsystem: "intake", material: "PLA" }), f({ subsystem: "Intake", material: "PETG", status: "printed" }), f({ subsystem: "Lift", material: "PETG", status: "failed" })];
     const hit = files.filter((x) => matchesFilters(x, { subsystem: "Intake", material: "PETG", status: "to_print" }));
     expect(hit).toHaveLength(1);
@@ -358,6 +358,88 @@ describe("review fixes", () => {
     const f = await uploadFile(admin, { name: "thumbed.stl", thumb: png });
     expect((await lib()).usage.used - before).toBe(stl().length + png.length);
     await del(`/api/prints/files/${f.body.id}`, admin);
+  });
+});
+
+describe("the print queue", () => {
+  const f = (id: number, o: Partial<PrintFile> = {}): PrintFile => ({ id, folderId: null, name: `${id}.stl`, kind: "stl", size: 1, createdAt: `2026-10-0${id}T00:00:00Z`, updatedAt: "", uploadedBy: null, notes: "", robotId: null, season: null, cadPart: null, subsystem: null, subsystemFrom: null, material: null, status: "to_print", copiesNeeded: null, copiesNeededFrom: null, copiesPrinted: 0, priority: "normal", dueDate: null, queuePos: null, collections: [], hasThumb: false, source: "upload", ...o });
+  const order = (files: PrintFile[]) => queueOrder(files).map((x) => x.id);
+
+  it("lines up by priority, then due date, then age, leaving out what's printing or printed", () => {
+    const files = [f(1), f(2, { priority: "low" }), f(3, { dueDate: "2026-11-02" }), f(4, { priority: "urgent" }), f(5, { dueDate: "2026-11-01", status: "failed" }), f(6, { status: "printing" }), f(7, { status: "printed" })];
+    expect(order(files)).toEqual([4, 5, 3, 1, 2]);
+  });
+  it("keeps the order people dragged, and slots unplaced files in before the first placed one they beat", () => {
+    // Dragged: low first, then high.
+    const placed = [f(1, { priority: "low", queuePos: 1 }), f(2, { priority: "high", queuePos: 2 })];
+    expect(order(placed)).toEqual([1, 2]);
+    // An urgent new file goes to the top and a normal one ahead of the low one it beats; a newer low one beats neither.
+    expect(order([...placed, f(3, { priority: "urgent" }), f(4), f(5, { priority: "low" })])).toEqual([3, 4, 1, 2, 5]);
+    expect(moveInOrder([1, 2, 3, 4], 4, 0)).toEqual([4, 1, 2, 3]);
+    expect(moveInOrder([1, 2, 3, 4], 1, 2)).toEqual([2, 3, 1, 4]);
+    expect(moveInOrder([1, 2, 3], 3, 99)).toEqual([1, 2, 3]);
+  });
+  it("takes only real calendar days as due dates", () => {
+    expect(cleanDueDate("2026-11-03")).toBe("2026-11-03");
+    expect(cleanDueDate("")).toBeNull();
+    expect(cleanDueDate(null)).toBeNull();
+    for (const bad of ["2026-02-30", "2026-13-01", "0002-11-03", "11/03/2026", "2026-11-3", 20261103]) expect(cleanDueDate(bad)).toBeUndefined();
+    expect(dueState("2026-10-29", "2026-10-30")).toBe("overdue");
+    expect(dueState("2026-10-30", "2026-10-30")).toBe("today");
+    expect(dueState("2026-11-02", "2026-10-30")).toBe("soon");
+    expect(dueState("2026-11-10", "2026-10-30")).toBe("later");
+  });
+
+  it("saves one shared order, and a new priority, due date or finished print gives up the file's place", async () => {
+    // One at a time, so they're created in this order.
+    const [a, b, c, d] = [await uploadFile(admin, { name: "q-a.stl" }), await uploadFile(admin, { name: "q-b.stl" }), await uploadFile(admin, { name: "q-c.stl" }), await uploadFile(admin, { name: "q-d.stl" })];
+    const mine = [a, b, c, d].map((x) => x.body.id as number);
+    const theirs = await t.db.execute({ sql: "INSERT INTO print_files (team_id, name, kind, size, sha256, storage_key, created_at, updated_at) VALUES (?, 'theirs.stl', 'stl', 1, 'x', 'k', 'x', 'x')", args: [other] });
+    const theirId = Number(theirs.lastInsertRowid);
+    const queue = async () => (await lib()).files.filter((x: PrintFile) => mine.includes(x.id));
+    const ordered = async () => queueOrder(await queue()).map((x) => x.id);
+
+    // Priority and due date are details.
+    expect((await t.patch(`/api/prints/files/${c.body.id}`, { priority: "urgent", dueDate: "2026-11-03" }, admin)).body).toMatchObject({ priority: "urgent", dueDate: "2026-11-03", queuePos: null });
+    expect((await t.patch(`/api/prints/files/${c.body.id}`, { priority: "asap" }, admin)).status).toBe(400);
+    expect((await t.patch(`/api/prints/files/${c.body.id}`, { dueDate: "2026-02-30" }, admin)).status).toBe(400);
+    expect(await ordered()).toEqual([c.body.id, a.body.id, b.body.id, d.body.id]);
+
+    // Members without manage_prints can't reorder.
+    expect((await t.post("/api/prints/queue", { ids: [d.body.id] }, student)).status).toBe(403);
+    expect((await t.post("/api/prints/queue", { ids: "nope" }, admin)).status).toBe(400);
+    // A drag saves the whole order; another workspace's file takes no place.
+    const r = await t.post("/api/prints/queue", { ids: [d.body.id, theirId, c.body.id, a.body.id, b.body.id] }, admin);
+    expect(r.status).toBe(200);
+    expect(r.body.files).toBe(4);
+    expect(await ordered()).toEqual([d.body.id, c.body.id, a.body.id, b.body.id]);
+    expect((await t.db.execute({ sql: "SELECT queue_pos FROM print_files WHERE id = ?", args: [theirId] })).rows[0].queue_pos).toBeNull();
+    // Everyone sees it.
+    expect(queueOrder((await lib(student)).files.filter((x: PrintFile) => mine.includes(x.id))).map((x) => x.id)).toEqual([d.body.id, c.body.id, a.body.id, b.body.id]);
+
+    // A new priority gives up the place: b (now urgent) slots in at the top, ahead of every placed file it beats.
+    expect((await t.patch(`/api/prints/files/${b.body.id}`, { priority: "urgent" }, admin)).body.queuePos).toBeNull();
+    expect(await ordered()).toEqual([b.body.id, d.body.id, c.body.id, a.body.id]);
+    // Editing anything else keeps it.
+    expect((await t.patch(`/api/prints/files/${d.body.id}`, { notes: "0.2 mm layers" }, admin)).body.queuePos).not.toBeNull();
+    // Printed files leave the queue and their place, whichever way they're marked.
+    expect((await t.patch(`/api/prints/files/${d.body.id}`, { status: "printed" }, admin)).body.queuePos).toBeNull();
+    await t.post("/api/prints/files/bulk", { ids: [c.body.id], action: "status", status: "printed" }, admin);
+    expect((await queue()).find((x: PrintFile) => x.id === c.body.id)!.queuePos).toBeNull();
+    // A printed file in an order takes no place.
+    await t.post("/api/prints/queue", { ids: [a.body.id, d.body.id, b.body.id] }, admin);
+    expect((await queue()).filter((x: PrintFile) => x.queuePos != null).map((x: PrintFile) => [x.id, x.queuePos])).toEqual([[a.body.id, 1], [b.body.id, 3]]);
+    expect(await ordered()).toEqual([a.body.id, b.body.id]);
+
+    // An empty order goes back to priority order.
+    expect((await t.post("/api/prints/queue", { ids: [] }, admin)).status).toBe(200);
+    expect((await queue()).every((x: PrintFile) => x.queuePos == null)).toBe(true);
+    expect(await ordered()).toEqual([b.body.id, a.body.id]);
+    const act = (await get("/api/prints/activity", admin)).body.map((x: any) => x.action);
+    expect(act).toEqual(expect.arrayContaining(["queue_order", "queue_reset"]));
+
+    await t.post("/api/prints/files/bulk", { ids: mine, action: "delete" }, admin);
+    await t.db.execute({ sql: "DELETE FROM print_files WHERE id = ?", args: [theirId] });
   });
 });
 

@@ -23,7 +23,7 @@ const res = (body: any, ok = true, status = ok ? 200 : 400) => Promise.resolve({
 const file = (id: number, name: string, over: Partial<PrintFile> = {}): PrintFile => ({
   id, folderId: null, name, kind: 'stl', size: 2048 * id, createdAt: '2026-10-20T10:00:00Z', updatedAt: `2026-10-2${id % 8}T10:00:00Z`, uploadedBy: 'Ada', notes: '',
   robotId: null, season: null, cadPart: null, subsystem: null, subsystemFrom: null, material: null, status: 'to_print', copiesNeeded: null, copiesNeededFrom: null,
-  copiesPrinted: 0, collections: [], hasThumb: false, source: 'upload', ...over,
+  copiesPrinted: 0, priority: 'normal', dueDate: null, queuePos: null, collections: [], hasThumb: false, source: 'upload', ...over,
 });
 let lib: PrintLibrary;
 const seed = (): PrintLibrary => ({
@@ -216,6 +216,17 @@ describe('Prints explorer', () => {
     expect(calls().filter((c) => c.url === '/api/prints/files/1')).toEqual([{ url: '/api/prints/files/1', method: 'PATCH', body: { status: 'printed' } }]);
   });
 
+  it('sets a file\'s priority and due date in its details', async () => {
+    setup();
+    await screen.findByRole('heading', { name: /All prints/ });
+    fireEvent.click(item('Camera mount.step'));
+    const sheet = await screen.findByRole('dialog', { name: 'Camera mount.step' });
+    fireEvent.change(within(sheet).getByRole('combobox', { name: 'Priority' }), { target: { value: 'high' } });
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/files/4', method: 'PATCH', body: { priority: 'high' } }));
+    fireEvent.change(within(sheet).getByLabelText('Due'), { target: { value: '2026-11-03' } });
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/files/4', method: 'PATCH', body: { dueDate: '2026-11-03' } }));
+  });
+
   it('is read-only for members without manage_prints', async () => {
     lib = { ...seed(), canEdit: false };
     api.apiFetch.mockImplementation((url: string) => (url === '/api/prints/library' ? res(lib) : res([])));
@@ -227,5 +238,124 @@ describe('Prints explorer', () => {
     const sheet = await screen.findByRole('dialog', { name: 'Camera mount.step' });
     expect(within(sheet).queryByRole('button', { name: /Delete/ })).toBeNull();
     expect(within(sheet).getByRole('button', { name: /Download/ })).toBeTruthy();
+  });
+});
+
+describe('Print queue', () => {
+  // Up next: Camera mount (urgent), then Roller hub and Lift spool (failed) by age. Plate is printing; Roller spacer is printed.
+  const queueLib = (): PrintLibrary => { const l = seed(); l.files[3] = { ...l.files[3], priority: 'urgent', dueDate: '2020-01-02' }; return l; };
+  const upNext = () => within(screen.getByRole('list', { name: 'Up next' })).getAllByRole('listitem').map((li) => within(li).getAllByRole('button').find((b) => !b.getAttribute('aria-label'))!.textContent);
+  const row = (name: string) => within(screen.getByRole('list', { name: 'Up next' })).getAllByRole('listitem').find((li) => li.textContent?.includes(name))!;
+
+  it('opens from the sidebar: printing now, then up next by priority', async () => {
+    lib = queueLib();
+    setup();
+    await screen.findByRole('heading', { name: /All prints/ });
+    fireEvent.click(within(sidebar()).getByRole('button', { name: /^Print queue:/ }));
+    expect(where).toBe('/prints?view=queue');
+    expect(await screen.findByRole('heading', { name: 'Print queue · 1 printing · 3 up next' })).toBeTruthy();
+    expect(within(screen.getByRole('list', { name: 'Printing now' })).getByText('Plate.gcode')).toBeTruthy();
+    expect(upNext()).toEqual([expect.stringContaining('Camera mount.step'), expect.stringContaining('Roller hub.stl'), expect.stringContaining('Lift spool.3mf')]);
+    expect(row('Camera mount.step').textContent).toContain('Overdue');
+    expect(within(sidebar()).getByRole('button', { name: /^Print queue:/ }).textContent).toContain('1 overdue');
+  });
+
+  it('saves the order a file is dragged into, for everyone', async () => {
+    lib = queueLib();
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    const dataTransfer = { setData: () => {}, getData: () => '', types: ['text/plain'], effectAllowed: '', dropEffect: '' };
+    fireEvent.dragStart(row('Lift spool.3mf'), { dataTransfer });
+    fireEvent.dragOver(row('Roller hub.stl'), { dataTransfer });
+    fireEvent.drop(row('Roller hub.stl'), { dataTransfer });
+    // Shown at once, then saved as the whole order.
+    expect(upNext()[1]).toContain('Lift spool.3mf');
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/queue', method: 'POST', body: { ids: [4, 3, 1] } }));
+  });
+
+  it('moves a file with Alt+arrows and from its menu', async () => {
+    lib = queueLib();
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Roller hub\.stl, 2 of 3/ }), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/queue', method: 'POST', body: { ids: [1, 4, 3] } }));
+    fireEvent.pointerDown(within(row('Camera mount.step')).getByRole('button', { name: 'Camera mount.step options' }), { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'To the bottom' }));
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/queue', method: 'POST', body: { ids: [1, 3, 4] } }));
+  });
+
+  it('sends queue saves one at a time, so a slow older save never lands after a newer one', async () => {
+    lib = queueLib();
+    let finishFirst: () => void = () => {};
+    const sent: number[][] = [];
+    api.apiFetch.mockImplementation((url: string, init?: any) => {
+      if (url === '/api/prints/library') return res(lib);
+      if (url === '/api/prints/queue') {
+        sent.push(JSON.parse(init.body).ids);
+        if (sent.length === 1) return new Promise((r) => { finishFirst = () => r({ ok: true, status: 200, json: async () => ({ success: true }) }); });
+      }
+      return res({ success: true, files: 1 });
+    });
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    const handle = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name.replace('.', '\\.')}, `) });
+    fireEvent.keyDown(handle('Lift spool.3mf'), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(sent).toEqual([[4, 3, 1]]));
+    // Two more moves while the first save is still out: nothing else is sent yet.
+    fireEvent.keyDown(handle('Lift spool.3mf'), { key: 'ArrowUp', altKey: true });
+    fireEvent.keyDown(handle('Roller hub.stl'), { key: 'ArrowUp', altKey: true });
+    expect(upNext().map((t) => t!.split('.')[0])).toEqual(['Lift spool', 'Roller hub', 'Camera mount']);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toHaveLength(1);
+    // Once it lands, only the latest order goes (it holds the move before it).
+    finishFirst();
+    await waitFor(() => expect(sent).toEqual([[4, 3, 1], [3, 1, 4]]));
+  });
+
+  it('names the workspace a queued save was made in, even after a switch meanwhile', async () => {
+    lib = queueLib();
+    let finishFirst: () => void = () => {};
+    const teams: (string | null)[] = [];
+    api.apiFetch.mockImplementation((url: string, init?: any) => {
+      if (url === '/api/prints/library') return res(lib);
+      if (url === '/api/prints/queue') {
+        teams.push(new Headers(init.headers).get('X-CP-Prints-Team'));
+        if (teams.length === 1) return new Promise((r) => { finishFirst = () => r({ ok: true, status: 200, json: async () => ({ success: true }) }); });
+      }
+      return res({ success: true, files: 1 });
+    });
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Lift spool\.3mf, / }), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(teams).toEqual(['1']));
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Lift spool\.3mf, / }), { key: 'ArrowUp', altKey: true });
+    // The workspace switches: the first save's reload brings back workspace 2.
+    lib = { ...queueLib(), teamId: 2 };
+    finishFirst();
+    // The waiting save still says workspace 1, so the server refuses it instead of clearing workspace 2's order.
+    await waitFor(() => expect(teams).toEqual(['1', '1']));
+  });
+
+  it('goes back to priority order after asking, once someone has placed a file', async () => {
+    lib = queueLib();
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    expect(screen.queryByRole('button', { name: /Priority order/ })).toBeNull();
+    cleanup();
+    lib.files[0] = { ...lib.files[0], queuePos: 1 };
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    fireEvent.click(screen.getByRole('button', { name: /Priority order/ }));
+    await waitFor(() => expect(dlg.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ title: 'Go back to priority order?' })));
+    await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/queue', method: 'POST', body: { ids: [] } }));
+  });
+
+  it('is view-only for members without manage_prints', async () => {
+    lib = { ...queueLib(), canEdit: false };
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    expect(row('Roller hub.stl').getAttribute('draggable')).toBe('false');
+    expect(screen.queryByRole('button', { name: /Alt\+Up/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Priority order/ })).toBeNull();
   });
 });
