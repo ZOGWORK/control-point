@@ -284,6 +284,34 @@ describe('Print queue', () => {
     await waitFor(() => expect(calls()).toContainEqual({ url: '/api/prints/queue', method: 'POST', body: { ids: [1, 3, 4] } }));
   });
 
+  it('sends queue saves one at a time, so a slow older save never lands after a newer one', async () => {
+    lib = queueLib();
+    let finishFirst: () => void = () => {};
+    const sent: number[][] = [];
+    api.apiFetch.mockImplementation((url: string, init?: any) => {
+      if (url === '/api/prints/library') return res(lib);
+      if (url === '/api/prints/queue') {
+        sent.push(JSON.parse(init.body).ids);
+        if (sent.length === 1) return new Promise((r) => { finishFirst = () => r({ ok: true, status: 200, json: async () => ({ success: true }) }); });
+      }
+      return res({ success: true, files: 1 });
+    });
+    setup('/prints?view=queue');
+    await screen.findByRole('list', { name: 'Up next' });
+    const handle = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name.replace('.', '\\.')}, `) });
+    fireEvent.keyDown(handle('Lift spool.3mf'), { key: 'ArrowUp', altKey: true });
+    await waitFor(() => expect(sent).toEqual([[4, 3, 1]]));
+    // Two more moves while the first save is still out: nothing else is sent yet.
+    fireEvent.keyDown(handle('Lift spool.3mf'), { key: 'ArrowUp', altKey: true });
+    fireEvent.keyDown(handle('Roller hub.stl'), { key: 'ArrowUp', altKey: true });
+    expect(upNext().map((t) => t!.split('.')[0])).toEqual(['Lift spool', 'Roller hub', 'Camera mount']);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toHaveLength(1);
+    // Once it lands, only the latest order goes (it holds the move before it).
+    finishFirst();
+    await waitFor(() => expect(sent).toEqual([[4, 3, 1], [3, 1, 4]]));
+  });
+
   it('goes back to priority order after asking, once someone has placed a file', async () => {
     lib = queueLib();
     setup('/prints?view=queue');

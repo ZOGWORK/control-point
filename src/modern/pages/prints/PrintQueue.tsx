@@ -3,7 +3,7 @@
 // dragging a file, or Alt+↑/↓ on it, or its menu's Move items, saves an order
 // the whole workspace shares. Files nobody has placed slot in by priority
 // (queueOrder() in src/types/prints.ts). The view is ?view=queue.
-import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Check, GripVertical, ListFilter, ListOrdered, MoreHorizontal, RotateCcw, XCircle } from 'lucide-react';
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '../../../components/ui-kit';
 import { cn } from '../../../components/cn';
@@ -22,7 +22,7 @@ export function queueSummary(files: readonly PrintFile[]): string {
   return [printing ? `${printing} printing` : '', `${next} up next`].filter(Boolean).join(' · ');
 }
 
-export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce, onBrowse }: {
+export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce, onBrowse, uploads }: {
   lib: PrintLibrary; prints: Prints;
   onOpen: (id: number) => void;
   onStatus: (ids: number[], status: PrintStatus) => Promise<void>;
@@ -30,11 +30,24 @@ export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce,
   onAnnounce: (message: string) => void;
   /** Opens folders and groups on a phone. */
   onBrowse: () => void;
+  /** The upload progress panel, while uploads run or report. */
+  uploads?: ReactNode;
 }) {
   const canEdit = lib.canEdit;
   // The order as the person just left it, shown until the saved one comes back.
   const [pending, setPending] = useState<number[] | null>(null);
   const saving = useRef(0);
+  const saves = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Save an order (or [] for priority order) after the saves before it, so an older one never lands last. A save a
+   * newer move replaced while it waited isn't sent: the newer one carries the whole order. Resolves once sent or skipped.
+   */
+  const saveOrder = (ids: number[]) => {
+    const seq = ++saving.current;
+    const run = saves.current.then(() => (seq === saving.current ? prints.setQueueOrder(ids).then(() => {}) : undefined));
+    saves.current = run.catch(() => {});
+    return run.finally(() => { if (saving.current === seq) setPending(null); });
+  };
   const [drag, setDrag] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<{ id: number; after: boolean } | null>(null);
   const focusAfter = useRef<number | null>(null);
@@ -58,14 +71,13 @@ export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce,
     const next = moveInOrder(ids, id, to);
     if (next.every((x, i) => x === ids[i])) return;
     const name = byId.get(id)?.name ?? 'File';
-    const seq = ++saving.current;
     setPending(next);
     onAnnounce(`${name} is now ${next.indexOf(id) + 1} of ${next.length}`);
-    try { await prints.setQueueOrder(next); } catch (e) { onError(e); } finally { if (saving.current === seq) setPending(null); }
+    try { await saveOrder(next); } catch (e) { onError(e); }
   };
   const resetOrder = async () => {
     if (!(await confirmDialog({ title: 'Go back to priority order?', message: 'The order people dragged is cleared for everyone. Files line up by priority, then due date.', confirmLabel: 'Use priority order' }))) return;
-    try { await prints.setQueueOrder([]); onAnnounce('The queue is in priority order'); } catch (e) { onError(e); }
+    try { await saveOrder([]); onAnnounce('The queue is in priority order'); } catch (e) { onError(e); }
   };
   const setPriority = async (f: PrintFile, priority: PrintPriority) => {
     try { await prints.updateFile(f.id, { priority }); onAnnounce(`${f.name} is ${PRIORITY_LABELS[priority].toLowerCase()} priority`); } catch (e) { onError(e); }
@@ -170,6 +182,7 @@ export function PrintQueue({ lib, prints, onOpen, onStatus, onError, onAnnounce,
         </div>
         {canEdit && placed && <Button variant="outline" size="sm" className="h-10 md:h-8" onClick={() => void resetOrder()}><RotateCcw /> Priority order</Button>}
       </div>
+      {uploads}
 
       {printing.length === 0 && upNext.length === 0 ? (
         <EmptyState icon={ListOrdered} title="Nothing to print" description="Files marked To print or Failed line up here, most pressing first. Set a file's priority and due date in its details." />

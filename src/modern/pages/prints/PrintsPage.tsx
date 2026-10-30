@@ -406,7 +406,9 @@ export function PrintsPage() {
         </aside>
 
         {queueMode ? (
-          <PrintQueue lib={lib} prints={prints} onOpen={setDetailsId} onStatus={setStatus} onError={fail} onAnnounce={setAnnounce} onBrowse={() => setBrowseOpen(true)} />
+          // Upload stays in the header here, so its progress and errors show here too.
+          <PrintQueue lib={lib} prints={prints} onOpen={setDetailsId} onStatus={setStatus} onError={fail} onAnnounce={setAnnounce} onBrowse={() => setBrowseOpen(true)}
+            uploads={uploads.length > 0 ? <UploadPanel items={uploads} onClose={() => setUploads([])} /> : null} />
         ) : (
           <section aria-label={here} className={cn('min-w-0 rounded-2xl', over === mainDropKey(groupMode, folderId) && 'ring-2 ring-accent ring-offset-4 ring-offset-background')} {...mainDrop} onKeyDown={onListKey}>
             {/* Location: the folder path, or the groups picked. */}
