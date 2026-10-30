@@ -90,7 +90,7 @@ async function offlinePredict<T extends object>(err: unknown, season: number, co
 export function fetchForecast(season: number, code: string, opts?: { force?: boolean; myTeam?: number | null }): Promise<ForecastView> {
   const onDevice = (e: unknown, newerThan?: string) => offlinePredict<ForecastView>(e, season, code, (f, ev, asOf, region, runs) => {
     const myTeam = opts?.myTeam ?? null;
-    const fc = f.forecast(ev, myTeam, runs);
+    const fc = f.forecast(ev, myTeam, runs, { factorSheets: true });
     return fc && { ...fc, eventName: ev.name, eventStart: ev.start, eventEnd: ev.end, myTeam, offline: { asOf, region } };
   }, newerThan);
   return forecastCache.get(`${season}:${code}`, async () => {
