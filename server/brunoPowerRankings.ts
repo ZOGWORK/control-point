@@ -164,7 +164,7 @@ export function buildPowerRankingsPrompt(p: PowerRankingsPacket): string {
 export const wordCount = (s: string) => (s.trim() ? s.trim().split(/\s+/).length : 0);
 
 /** The first top-level JSON object in a model reply (tolerates code fences and stray prose). */
-function extractJson(raw: string): unknown {
+export function extractJson(raw: string): unknown {
   const s = String(raw || "").replace(/^﻿/, "").trim();
   const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const body = fenced ? fenced[1] : s;
