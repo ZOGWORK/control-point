@@ -28,7 +28,7 @@ export function FactorSheetPanel({ sheet, className }: { sheet: FactorSheet; cla
       </summary>
       <div className="space-y-3 border-t border-border px-3 pb-3 pt-2.5">
         {Math.abs(sheet.logit) < COIN_FLIP && (
-          <p className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs">This call is close to a coin flip, so every factor is small. The shares show how that small lean splits.</p>
+          <p className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs">This call is close to a coin flip. Strong factors can pull in opposite directions and cancel each other.</p>
         )}
         <Section title="Game phases" note="An exact split of the predicted margin" items={sheet.phases} top={top} />
         {sheet.model.length > 0 && <Section title="What else the win model weighs" note="How the odds move beyond the score gap" items={sheet.model} top={top} />}
