@@ -38,6 +38,13 @@ describe('Predict matches: full why breakdown', () => {
     expect(within(panel).getByText('Schedule strength').closest('li')!.textContent).toContain('0%');
   });
 
+  it('draws what the call leans on as one bar whose segments fill it exactly', () => {
+    show([m('Q1', null, sheet())]);
+    const bar = within(screen.getByTestId('sheet-tug')).getByRole('img');
+    const widths = [...bar.children].map((c) => parseFloat((c as HTMLElement).style.width));
+    expect(widths.reduce((a, w) => a + w, 0)).toBeCloseTo(100, 6);
+  });
+
   it('adds nothing to played matches, or to a forecast without sheets', () => {
     show([m('Q2', { red: 50, blue: 60 }, null), m('Q3', null, undefined)]);
     expect(screen.queryByTestId('factor-sheet')).toBeNull();
