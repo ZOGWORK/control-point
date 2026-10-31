@@ -14,6 +14,7 @@ import { EmptyState, Stat } from '../../ui/page';
 import { Stagger, StaggerItem } from '../../ui/motion';
 import { AnimatedValue } from '../../AnimatedValue';
 import { BonusOdds } from './BonusOdds';
+import { FactorSheetPanel } from './FactorSheet';
 
 type FcProps = { fc: ForecastView; myTeam: number | null };
 const ease = [0.2, 0.8, 0.2, 1] as const;
@@ -358,6 +359,7 @@ function MatchRow({ m, myTeam, season, reasons = [] }: { m: NonNullable<Forecast
           {reasons.map((r) => <li key={r}>{r}</li>)}
         </ul>
       )}
+      {!m.played && m.factorSheet ? <FactorSheetPanel sheet={m.factorSheet} className="col-span-2 sm:col-span-4 sm:col-start-2" /> : null}
     </StaggerItem>
   );
 }

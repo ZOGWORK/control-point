@@ -6695,7 +6695,8 @@ async function startServer() {
   }
   /** Forecast an event, record its snapshots, and annotate played matches with their pre-match odds. */
   function forecastAndRecord(ev: Parameters<typeof predictEngine.forecast>[0], myTeam: number | null): Forecast | null {
-    const fc = predictEngine.forecast(ev, myTeam);
+    // With each unplayed match's full why breakdown (engine 3.3), for Predict → Matches.
+    const fc = predictEngine.forecast(ev, myTeam, undefined, { factorSheets: true });
     if (!fc) return null;
     if (eventStillOpen(ev.end)) predictMonitor.record(fc, new Date(), predictEngine.storedPlayedKeys(ev.season, ev.code));
     return predictMonitor.annotate(fc);
