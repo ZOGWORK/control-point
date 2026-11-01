@@ -4,8 +4,9 @@
  *
  * Scout sends a visitor's question ("how many times did 4215 go to states") with the facts its own search found
  * for it, each a line of plain text (the team's championships with dates, ranks, records and OPRs; the top
- * results; the team's latest season). Bruno writes a short answer from those lines and nothing else, or null when
- * they don't answer it. Scout checks every number in the answer against the facts before showing it.
+ * results; the team's latest season). Bruno writes a short answer from those lines and nothing else (one sentence,
+ * then a bullet point per record when there are several), or null when they don't answer it. Scout checks every
+ * number in the answer against the facts before showing it.
  *
  * Pure (no DB, no network): the packet check, the prompt and the output parser are testable on their own; the
  * route wires them to aiChat.
@@ -17,11 +18,15 @@ export const MAX_FACTS = 40;
 export const MAX_FACT = 400;
 export const MAX_FACTS_CHARS = 8000;
 export const MAX_ANSWER = 600;
+export const MAX_POINTS = 6;
+export const MAX_POINT = 200;
 
 // eslint-disable-next-line no-control-regex
 const clean = (s: string) => s.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 
 export interface SearchAnswerPacket { question: string; facts: string[] }
+/** Bruno's answer: the direct answer in a sentence, then one short point per record it rests on (often none). */
+export interface SearchAnswer { text: string; points: string[] }
 
 /** Scout's request: `{ question, facts }`. Unknown fields are dropped, never echoed to the model. */
 export function validateAnswerPacket(body: unknown): { ok: boolean; value?: SearchAnswerPacket; error?: string } {
@@ -49,13 +54,15 @@ You answer a visitor's question on Control Scout, an FTC (FIRST Tech Challenge) 
 
 Rules:
 - Answer only from the FACTS. Never add a number, year, date, event, rank, record, OPR, award or team that isn't in them, and never guess or estimate.
-- Answer the question directly first ("Yes, 3 times: ..."), then the key specifics from the FACTS. 1 to 3 short sentences, at most 70 words. Plain text: no markdown, no lists, no links.
+- "text" answers the question directly in one short sentence, at most 30 words ("Yes, Hypnotic Robotics (4215) went to states 4 times since 2019-20.").
+- "points" holds the specifics behind it, one short line per record (a season, an event, a match), at most ${MAX_POINTS} lines of at most 15 words each, in the FACTS' order ("2022-23: ranked #1, 4-1-0, OPR 102.6, Winning Alliance"). When one sentence says it all, points is [].
+- Plain text everywhere: no markdown, no bullet characters, no links.
 - Copy numbers exactly as the FACTS write them (OPR 237.4, ranked #3, 8-2-0). Write counts as digits.
 - When the FACTS say the records start at a season, and the question is about a whole history ("how many times", "ever"), say the count is from that season on.
-- If the FACTS don't answer the question, the text is null. Do not say what you would need.
+- If the FACTS don't answer the question, text is null and points is []. Do not say what you would need.
 - Friendly and neutral. Do not mention any other scouting, stats or rankings website or app.
 - Reply with JSON only, no code fences and nothing before or after it, exactly in this shape:
-{"text": "Yes, Hypnotic Robotics (4215) went to states 3 times since 2023-24: ..."}  or  {"text": null}`;
+{"text": "Yes, Hypnotic Robotics (4215) went to states 3 times since 2023-24.", "points": ["2023-24: ranked #3, 4-1-0, OPR 111.5, Winning Alliance", "..."]}  or  {"text": null, "points": []}`;
 
 export function buildSearchAnswerPrompt(p: SearchAnswerPacket): string {
   return `Question: ${JSON.stringify(p.question)}\n\nFACTS:\n${p.facts.map((f) => `- ${f.replace(/^- /, "")}`).join("\n")}`;
@@ -64,8 +71,10 @@ export function buildSearchAnswerPrompt(p: SearchAnswerPacket): string {
 /**
  * Bruno's answer, or null when he found none in the facts. Throws when the reply is not the agreed JSON shape (the
  * route answers 502). Markdown he slipped in is stripped; an answer past MAX_ANSWER characters is treated as none.
+ * Points are optional (an older reply shape is just `text`): past MAX_POINTS they're cut, and an empty or over-long
+ * one is dropped.
  */
-export function parseSearchAnswerOutput(raw: string): string | null {
+export function parseSearchAnswerOutput(raw: string): SearchAnswer | null {
   let data: any;
   try {
     data = extractJson(raw);
@@ -75,9 +84,15 @@ export function parseSearchAnswerOutput(raw: string): string | null {
   if (!data || typeof data !== "object" || Array.isArray(data) || !("text" in data)) throw new Error("malformed_output");
   if (data.text === null) return null;
   if (typeof data.text !== "string") throw new Error("malformed_output");
-  const t = clean(plain(data.text));
-  if (!t || t.length > MAX_ANSWER) return null;
-  return t;
+  if (data.points != null && !Array.isArray(data.points)) throw new Error("malformed_output");
+  const text = clean(plain(data.text));
+  if (!text || text.length > MAX_ANSWER) return null;
+  const points = ((data.points ?? []) as unknown[])
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => clean(plain(p)))
+    .filter((p) => p && p.length <= MAX_POINT)
+    .slice(0, MAX_POINTS);
+  return { text, points };
 }
 
 /** Markdown he slipped in, as plain text: links keep their words, emphasis, code, headings and list markers go. */
