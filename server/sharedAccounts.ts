@@ -74,6 +74,22 @@
  *     ai_usage as endpoint "power-rankings" under the system actor (member_id 0,
  *     no team), not a member.
  *
+ * Bruno answering a Scout search question (from the facts Scout's own search found):
+ *
+ *   POST /internal/bruno/search-answer
+ *     body: { question: string (1..200 once whitespace is folded),
+ *             facts: string[] (1..40 lines, each 1..400, 8,000 in all) }
+ *     200 { text: string | null }   Bruno's answer in 1-3 sentences, written
+ *       only from the facts (<= 600 characters, plain text), or null when the
+ *       facts don't answer it. Scout drops any answer naming a number that
+ *       isn't in the facts.
+ *     400 { error: "invalid_packet", field }   no question, bad or too many facts
+ *     429 { error: "rate_limited" }            over 600 calls in the last hour (Retry-After set)
+ *     502 { error: "ai_failed" | "malformed_output" }
+ *     503 { error: "ai_unavailable" }
+ *     Same aiChat path as the power rankings (offline, system actor), logged
+ *     in ai_usage as endpoint "search-answer".
+ *
  * Env:
  *   CONTROL_SCOUT_INTERNAL_KEY  shared secret (32+ chars) Scout sends as
  *                               X-Internal-Key. Unset → /internal/* is 404.
@@ -85,6 +101,7 @@ import crypto from "crypto";
 import express from "express";
 import { RateLimiter, clientIp, limit, normEmail } from "./rateLimit.js";
 import { POWER_RANKINGS_SYSTEM, buildPowerRankingsPrompt, parsePowerRankingsOutput, validatePacket } from "./brunoPowerRankings.js";
+import { SEARCH_ANSWER_SYSTEM, buildSearchAnswerPrompt, parseSearchAnswerOutput, validateAnswerPacket } from "./brunoSearchAnswer.js";
 
 export interface SharedAccountDeps {
   dbGet: (sql: string, ...args: any[]) => Promise<any>;
@@ -163,6 +180,8 @@ const MAX_SHORTLIST = 200;
 
 /** Calls per hour to /internal/bruno/power-rankings (the weekly job plus a few owner regenerations). */
 export const POWER_RANKINGS_RATE = { max: 10, windowMs: 60 * 60 * 1000 };
+/** Calls per hour to /internal/bruno/search-answer: Scout asks only for questions on /search, and caches each answer. */
+export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
@@ -545,6 +564,34 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
         res.json(output);
       } catch {
         console.warn(`[shared-accounts] power-rankings ${packet.value!.week}: malformed AI output (${raw.length} chars)`);
+        res.status(502).json({ error: "malformed_output" });
+      }
+    });
+
+    // Scout's /search: Bruno answers a question from the facts its search found (server/brunoSearchAnswer.ts).
+    const answerLimiter = new RateLimiter(now);
+    router.post("/bruno/search-answer", async (req, res) => {
+      const packet = validateAnswerPacket(req.body);
+      if (!packet.ok) return res.status(400).json({ error: "invalid_packet", field: packet.error });
+      if (!deps.brunoWrite) return res.status(503).json({ error: "ai_unavailable" });
+      // One global bucket: Scout is the only caller.
+      const wait = answerLimiter.hit("bruno-search-answer", SEARCH_ANSWER_RATE);
+      if (wait > 0) {
+        res.setHeader("Retry-After", String(wait));
+        return res.status(429).json({ error: "rate_limited" });
+      }
+      let raw: string;
+      try {
+        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: 400 });
+      } catch (err: any) {
+        console.warn("[shared-accounts] search-answer: AI call failed:", String(err?.message || err).slice(0, 200));
+        if (/not configured/i.test(String(err?.message || ""))) return res.status(503).json({ error: "ai_unavailable" });
+        return res.status(502).json({ error: "ai_failed" });
+      }
+      try {
+        res.json({ text: parseSearchAnswerOutput(raw) });
+      } catch {
+        console.warn(`[shared-accounts] search-answer: malformed AI output (${raw.length} chars)`);
         res.status(502).json({ error: "malformed_output" });
       }
     });
