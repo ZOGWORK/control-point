@@ -47,7 +47,7 @@ async function boot(opts: { env?: Record<string, string>; brunoWrite?: any; now?
   servers.push(server);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const port = (server.address() as any).port;
-  return async (body: unknown, key: string | null = KEY) => {
+  const post = async (body: unknown, key: string | null = KEY) => {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (key !== null) headers["x-internal-key"] = key;
     const r = await fetch(`http://127.0.0.1:${port}/internal/bruno/search-answer`, {
@@ -55,6 +55,16 @@ async function boot(opts: { env?: Record<string, string>; brunoWrite?: any; now?
     });
     return { status: r.status, body: await r.json().catch(() => null), retryAfter: r.headers.get("retry-after") };
   };
+  /** Asked streamed (Accept: application/x-ndjson): the content type and each line, parsed. */
+  const stream = async (body: unknown) => {
+    const r = await fetch(`http://127.0.0.1:${port}/internal/bruno/search-answer`, {
+      method: "POST", headers: { "content-type": "application/json", "x-internal-key": KEY, accept: "application/x-ndjson" }, body: JSON.stringify(body),
+    });
+    const text = await r.text();
+    const type = r.headers.get("content-type") ?? "";
+    return { status: r.status, type, lines: type.includes("ndjson") ? text.split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [], body: type.includes("ndjson") ? null : JSON.parse(text || "null") };
+  };
+  return Object.assign(post, { stream });
 }
 
 describe("auth", () => {
@@ -173,5 +183,43 @@ describe("route", () => {
     expect(Number(r.retryAfter)).toBeGreaterThan(0);
     t += SEARCH_ANSWER_RATE.windowMs;
     expect((await post(packet())).status).toBe(200);
+  });
+});
+
+describe("streamed (Accept: application/x-ndjson)", () => {
+  const REPLY = '{"text": "Hypnotic Robotics (4215) went to states 3 times since 2023–24.", "points": ["2024–25: ranked #7, OPR 117.3"]}';
+  /** A fake model that writes its reply in pieces through onChunk, as aiChat does when streaming. */
+  const pieces = (reply: string, size = 7) => vi.fn(async (job: { onChunk?: (t: string) => void }) => {
+    for (let i = 0; i < reply.length; i += size) job.onChunk?.(reply.slice(i, i + size));
+    return reply;
+  });
+  it("sends the model's raw text as it arrives, then the same answer the JSON reply has", async () => {
+    const write = pieces(REPLY);
+    const post = await boot({ brunoWrite: write });
+    const r = await post.stream(packet());
+    expect(r.status).toBe(200);
+    expect(r.type).toContain("application/x-ndjson");
+    const ds = r.lines.filter((l) => "d" in l);
+    expect(ds.length).toBeGreaterThan(1);
+    expect(ds.map((l) => l.d).join("")).toBe(REPLY);
+    expect(r.lines.at(-1)).toEqual({ answer: (await post(packet())).body });
+    expect(r.lines.filter((l) => "answer" in l)).toHaveLength(1);
+    // Same job as the JSON reply, with a way to stop it.
+    expect(write).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, maxTokens: SEARCH_ANSWER_MAX_TOKENS, onChunk: expect.any(Function), signal: expect.any(AbortSignal) }));
+    // The JSON reply never streams.
+    expect(write.mock.calls.at(-1)![0]).not.toHaveProperty("onChunk");
+  });
+  it("a failure before the first piece answers with the usual status; after it, an error line", async () => {
+    const early = await (await boot({ brunoWrite: async () => { throw new Error("boom"); } })).stream(packet());
+    expect(early).toMatchObject({ status: 502, body: { error: "ai_failed" } });
+    const late = await (await boot({ brunoWrite: async (job: any) => { job.onChunk('{"text": "Hyp'); throw new Error("boom"); } })).stream(packet());
+    expect(late.status).toBe(200);
+    expect(late.lines).toEqual([{ d: '{"text": "Hyp' }, { error: "ai_failed" }]);
+    const off = await (await boot({ brunoWrite: pieces("no json here") })).stream(packet());
+    expect(off.lines.at(-1)).toEqual({ error: "malformed_output" });
+  });
+  it("a reply the model sent whole (no pieces) comes back as plain JSON", async () => {
+    const r = await (await boot({ brunoWrite: async () => REPLY })).stream(packet());
+    expect(r).toMatchObject({ status: 200, body: { text: "Hypnotic Robotics (4215) went to states 3 times since 2023–24." } });
   });
 });

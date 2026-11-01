@@ -390,6 +390,8 @@ async function callAnthropicChat(opts: {
   let buffer = "";
   let full = "";
   let lastUsage: AiUsage | null = null;
+  // The prompt's count comes in message_start; message_delta carries the reply's (and the prompt's only sometimes).
+  let startInputTokens = 0;
   let refused = false;
   let streamError: { type?: string; message?: string } | null = null;
   const maxAccumChars = Math.max(8000, opts.maxTokens * 8);
@@ -397,7 +399,7 @@ async function callAnthropicChat(opts: {
     if (opts.signal?.aborted) break;
     let read: ReadableStreamReadResult<Uint8Array>;
     try {
-      read = await readStreamChunk(reader);
+      read = await readStreamChunk(reader, undefined, opts.signal);
     } catch (err) {
       try { await reader.cancel(); } catch { /* noop */ }
       throw err;
@@ -423,8 +425,9 @@ async function callAnthropicChat(opts: {
             if (full.length >= maxAccumChars) break;
           }
         }
+        if (parsed?.type === "message_start" && parsed?.message?.usage) startInputTokens = parsed.message.usage.input_tokens || 0;
         if (parsed?.type === "message_delta" && parsed?.usage) {
-          lastUsage = extractAnthropicUsage({ usage: parsed.usage });
+          lastUsage = extractAnthropicUsage({ usage: { ...parsed.usage, input_tokens: parsed.usage.input_tokens || startInputTokens } });
         }
         if (parsed?.type === "message_delta" && parsed?.delta?.stop_reason === "refusal") refused = true;
         // An error mid-stream (overloaded, rate limited, ...) arrives as an SSE
@@ -517,7 +520,7 @@ async function callOpenAIChat(
     if (opts.signal?.aborted) break;
     let read: ReadableStreamReadResult<Uint8Array>;
     try {
-      read = await readStreamChunk(reader);
+      read = await readStreamChunk(reader, undefined, opts.signal);
     } catch (err) {
       try {
         await reader.cancel();
