@@ -79,10 +79,11 @@
  *   POST /internal/bruno/search-answer
  *     body: { question: string (1..200 once whitespace is folded),
  *             facts: string[] (1..40 lines, each 1..400, 8,000 in all) }
- *     200 { text: string | null }   Bruno's answer in 1-3 sentences, written
- *       only from the facts (<= 600 characters, plain text), or null when the
- *       facts don't answer it. Scout drops any answer naming a number that
- *       isn't in the facts.
+ *     200 { text: string | null, points: string[] }   Bruno's answer, written
+ *       only from the facts: text is one sentence (<= 600 characters, plain
+ *       text), points one short line per record behind it (0..6, each <= 200).
+ *       text is null, points [], when the facts don't answer it. Scout drops
+ *       any answer naming a number that isn't in the facts.
  *     400 { error: "invalid_packet", field }   no question, bad or too many facts
  *     429 { error: "rate_limited" }            over 600 calls in the last hour (Retry-After set)
  *     502 { error: "ai_failed" | "malformed_output" }
@@ -182,6 +183,8 @@ const MAX_SHORTLIST = 200;
 export const POWER_RANKINGS_RATE = { max: 10, windowMs: 60 * 60 * 1000 };
 /** Calls per hour to /internal/bruno/search-answer: Scout asks only for questions on /search, and caches each answer. */
 export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
+/** Room for the sentence and all six points (seasons, records, decimal OPRs run to many tokens): a cut-off reply is malformed JSON. */
+export const SEARCH_ANSWER_MAX_TOKENS = 900;
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
@@ -582,14 +585,15 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       }
       let raw: string;
       try {
-        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: 400 });
+        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: SEARCH_ANSWER_MAX_TOKENS });
       } catch (err: any) {
         console.warn("[shared-accounts] search-answer: AI call failed:", String(err?.message || err).slice(0, 200));
         if (/not configured/i.test(String(err?.message || ""))) return res.status(503).json({ error: "ai_unavailable" });
         return res.status(502).json({ error: "ai_failed" });
       }
       try {
-        res.json({ text: parseSearchAnswerOutput(raw) });
+        const answer = parseSearchAnswerOutput(raw);
+        res.json({ text: answer?.text ?? null, points: answer?.points ?? [] });
       } catch {
         console.warn(`[shared-accounts] search-answer: malformed AI output (${raw.length} chars)`);
         res.status(502).json({ error: "malformed_output" });

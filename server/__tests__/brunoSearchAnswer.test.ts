@@ -6,9 +6,10 @@
 import http from "http";
 import express from "express";
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { createSharedAccounts, SEARCH_ANSWER_RATE } from "../sharedAccounts";
+import { createSharedAccounts, SEARCH_ANSWER_MAX_TOKENS, SEARCH_ANSWER_RATE } from "../sharedAccounts";
 import {
   MAX_FACTS,
+  MAX_POINTS,
   SEARCH_ANSWER_SYSTEM,
   buildSearchAnswerPrompt,
   parseSearchAnswerOutput,
@@ -106,20 +107,28 @@ describe("prompt", () => {
     for (const f of FACTS) expect(p).toContain(f.replace(/^- /, ""));
     expect(SEARCH_ANSWER_SYSTEM).toMatch(/only from the FACTS/);
     expect(SEARCH_ANSWER_SYSTEM).toMatch(/Never add a number/);
+    expect(SEARCH_ANSWER_SYSTEM).toContain(`at most ${MAX_POINTS} lines`);
     expect(SEARCH_ANSWER_SYSTEM).toMatch(/other scouting, stats or rankings website/);
   });
 });
 
 describe("output", () => {
   it("reads the answer, with code fences and markdown stripped", () => {
-    expect(parseSearchAnswerOutput('```json\n{"text": "**Yes**, 3 times since 2023–24."}\n```')).toBe("Yes, 3 times since 2023–24.");
+    expect(parseSearchAnswerOutput('```json\n{"text": "**Yes**, 3 times since 2023–24."}\n```')).toEqual({ text: "Yes, 3 times since 2023–24.", points: [] });
+  });
+  it("reads the points: plain text, empty or over-long ones dropped, at most MAX_POINTS", () => {
+    const points = ["- **2023–24**: ranked #3", "", "x".repeat(201), 5, ...Array.from({ length: 8 }, (_, i) => `p${i}`)];
+    const r = parseSearchAnswerOutput(JSON.stringify({ text: "Yes, 3 times.", points }));
+    expect(r).toEqual({ text: "Yes, 3 times.", points: ["2023–24: ranked #3", "p0", "p1", "p2", "p3", "p4"] });
+    expect(r!.points).toHaveLength(MAX_POINTS);
+    expect(() => parseSearchAnswerOutput('{"text": "Yes.", "points": "a, b"}')).toThrow("malformed_output");
   });
   it("any other Markdown comes back as plain text: single emphasis, links, lists, headings", () => {
-    expect(parseSearchAnswerOutput('{"text": "*Yes*, _3_ times."}')).toBe("Yes, 3 times.");
-    expect(parseSearchAnswerOutput('{"text": "See [Hypnotic Robotics](https://controlscout.org/teams/4215)."}')).toBe("See Hypnotic Robotics.");
-    expect(parseSearchAnswerOutput('{"text": "## Answer\\n- 3 times\\n1. since 2023–24"}')).toBe("Answer 3 times since 2023–24");
+    expect(parseSearchAnswerOutput('{"text": "*Yes*, _3_ times."}')).toEqual({ text: "Yes, 3 times.", points: [] });
+    expect(parseSearchAnswerOutput('{"text": "See [Hypnotic Robotics](https://controlscout.org/teams/4215)."}')).toEqual({ text: "See Hypnotic Robotics.", points: [] });
+    expect(parseSearchAnswerOutput('{"text": "## Answer\\n- 3 times\\n1. since 2023–24"}')).toEqual({ text: "Answer 3 times since 2023–24", points: [] });
     // Plain text is left alone: a record, a dash, an underscore inside a word.
-    expect(parseSearchAnswerOutput('{"text": "Went 8-2-0 - ranked #3 in team_name 4215."}')).toBe("Went 8-2-0 - ranked #3 in team_name 4215.");
+    expect(parseSearchAnswerOutput('{"text": "Went 8-2-0 - ranked #3 in team_name 4215."}')).toEqual({ text: "Went 8-2-0 - ranked #3 in team_name 4215.", points: [] });
   });
   it("null stays null; an over-long answer counts as none; any other shape is malformed", () => {
     expect(parseSearchAnswerOutput('{"text": null}')).toBeNull();
@@ -132,11 +141,22 @@ describe("output", () => {
 
 describe("route", () => {
   it("sends the job to Bruno offline and answers his text", async () => {
-    const write = vi.fn(async () => '{"text": "Hypnotic Robotics (4215) went to states 3 times since 2023–24."}');
+    const write = vi.fn(async () => '{"text": "Hypnotic Robotics (4215) went to states 3 times since 2023–24.", "points": ["2024–25: ranked #7, OPR 117.3"]}');
     const post = await boot({ brunoWrite: write });
     const r = await post(packet());
-    expect(r).toMatchObject({ status: 200, body: { text: "Hypnotic Robotics (4215) went to states 3 times since 2023–24." } });
+    expect(r).toMatchObject({ status: 200, body: { text: "Hypnotic Robotics (4215) went to states 3 times since 2023–24.", points: ["2024–25: ranked #7, OPR 117.3"] } });
+    // No answer in the facts: null text, no points.
+    expect((await (await boot({ brunoWrite: async () => '{"text": null}' }))(packet())).body).toEqual({ text: null, points: [] });
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM }));
+  });
+  it("leaves room for a full answer: the sentence and six points come back whole", async () => {
+    const points = Array.from({ length: MAX_POINTS }, (_, i) => `${2019 + i}–${20 + i}: New Jersey Championship - Turnpike Division, ranked #${i + 1}, 4-1-0 in quals, OPR 1${i}2.6, Winning Alliance`);
+    const write = vi.fn(async () => JSON.stringify({ text: "Hypnotic Robotics (4215) went to states 6 times since 2019–20.", points }));
+    const r = await (await boot({ brunoWrite: write }))(packet());
+    expect(r.body.points).toEqual(points);
+    // About 25 tokens a point: the budget holds all six with room to spare.
+    expect(SEARCH_ANSWER_MAX_TOKENS).toBeGreaterThanOrEqual(MAX_POINTS * 60 + 200);
+    expect(write).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: SEARCH_ANSWER_MAX_TOKENS }));
   });
   it("503 when no AI is configured, 502 when it fails or replies off-shape", async () => {
     expect((await (await boot())(packet())).status).toBe(503);
