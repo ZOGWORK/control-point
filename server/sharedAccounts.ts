@@ -84,6 +84,13 @@
  *       text), points one short line per record behind it (0..6, each <= 200).
  *       text is null, points [], when the facts don't answer it. Scout drops
  *       any answer naming a number that isn't in the facts.
+ *     Streamed (Accept: application/x-ndjson): 200 application/x-ndjson, one
+ *       JSON object a line: { d: string } for each piece of the model's raw
+ *       reply as it arrives (the agreed JSON, still being written), then
+ *       exactly one { answer: { text, points } } (the 200 body above) or
+ *       { error: "ai_failed" | "malformed_output" }. Same model call, prompt
+ *       and limits; a call that fails before its first piece answers with
+ *       the statuses below, unstreamed. Scout going away stops the call.
  *     400 { error: "invalid_packet", field }   no question, bad or too many facts
  *     429 { error: "rate_limited" }            over 600 calls in the last hour (Retry-After set)
  *     502 { error: "ai_failed" | "malformed_output" }
@@ -117,9 +124,10 @@ export interface SharedAccountDeps {
   /**
    * One Bruno call for a system writing job (server.ts wires it to aiChat, offline, and logs
    * ai_usage under the system actor). Throws when the model call fails. Unset → the
-   * power-rankings route answers 503.
+   * power-rankings route answers 503. `onChunk`: stream the reply's text as it arrives (the search answer, when
+   * Scout asks for it streamed); `signal`: stop the model call (Scout went away).
    */
-  brunoWrite?: (job: { endpoint: string; system: string; user: string; maxTokens: number }) => Promise<string>;
+  brunoWrite?: (job: { endpoint: string; system: string; user: string; maxTokens: number; onChunk?: (text: string) => void; signal?: AbortSignal }) => Promise<string>;
   env?: Record<string, string | undefined>;
   now?: () => number;
 }
@@ -583,20 +591,39 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
         res.setHeader("Retry-After", String(wait));
         return res.status(429).json({ error: "rate_limited" });
       }
+      // Streamed when Scout asks for NDJSON (see the contract above): the model's raw text as it arrives, then the
+      // same parsed answer the JSON reply carries. Nothing is written until the first piece, so a call that fails
+      // before it answers with the usual status.
+      const streamed = /application\/x-ndjson/.test(String(req.headers.accept || ""));
+      const stop = new AbortController();
+      if (streamed) res.on("close", () => { if (!res.writableEnded) stop.abort(); });
+      const line = (o: unknown) => {
+        if (!res.headersSent) {
+          res.status(200).set({ "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
+          res.flushHeaders();
+        }
+        if (!res.destroyed) res.write(JSON.stringify(o) + "\n");
+      };
       let raw: string;
       try {
-        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: SEARCH_ANSWER_MAX_TOKENS });
+        raw = await deps.brunoWrite({
+          endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: SEARCH_ANSWER_MAX_TOKENS,
+          ...(streamed ? { onChunk: (d: string) => { if (d) line({ d }); }, signal: stop.signal } : {}),
+        });
       } catch (err: any) {
+        if (stop.signal.aborted) return res.end();
         console.warn("[shared-accounts] search-answer: AI call failed:", String(err?.message || err).slice(0, 200));
+        if (res.headersSent) { line({ error: "ai_failed" }); return res.end(); }
         if (/not configured/i.test(String(err?.message || ""))) return res.status(503).json({ error: "ai_unavailable" });
         return res.status(502).json({ error: "ai_failed" });
       }
       try {
         const answer = parseSearchAnswerOutput(raw);
-        res.json({ text: answer?.text ?? null, points: answer?.points ?? [] });
+        const body = { text: answer?.text ?? null, points: answer?.points ?? [] };
+        if (res.headersSent) { line({ answer: body }); res.end(); } else res.json(body);
       } catch {
         console.warn(`[shared-accounts] search-answer: malformed AI output (${raw.length} chars)`);
-        res.status(502).json({ error: "malformed_output" });
+        if (res.headersSent) { line({ error: "malformed_output" }); res.end(); } else res.status(502).json({ error: "malformed_output" });
       }
     });
 

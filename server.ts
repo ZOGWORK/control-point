@@ -2371,16 +2371,18 @@ async function startServer() {
     // System writing jobs (Scout's power-rankings blurbs): Bruno through aiChat, so the Gemini to
     // Anthropic failover and timeouts apply, with web search off. Usage is logged under the system
     // actor (member_id 0, no team), never a member. logAiUsage is declared further down.
-    brunoWrite: async ({ endpoint, system, user, maxTokens }) => {
+    brunoWrite: async ({ endpoint, system, user, maxTokens, onChunk, signal }) => {
       let usage: any = null;
       try {
         const r = await aiChat({
           extraSystem: system,
           messages: [{ role: "user", text: user }],
           maxTokens,
-          stream: false,
+          stream: !!onChunk,
           offline: true,
+          onChunk,
           onUsage: (u) => { usage = u; },
+          signal,
         });
         logAiUsage(0, null, usage, system.length + user.length, r.text.length, "ok", r.provider, endpoint);
         return r.text;
