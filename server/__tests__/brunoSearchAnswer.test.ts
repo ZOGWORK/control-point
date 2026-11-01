@@ -114,6 +114,13 @@ describe("output", () => {
   it("reads the answer, with code fences and markdown stripped", () => {
     expect(parseSearchAnswerOutput('```json\n{"text": "**Yes**, 3 times since 2023–24."}\n```')).toBe("Yes, 3 times since 2023–24.");
   });
+  it("any other Markdown comes back as plain text: single emphasis, links, lists, headings", () => {
+    expect(parseSearchAnswerOutput('{"text": "*Yes*, _3_ times."}')).toBe("Yes, 3 times.");
+    expect(parseSearchAnswerOutput('{"text": "See [Hypnotic Robotics](https://controlscout.org/teams/4215)."}')).toBe("See Hypnotic Robotics.");
+    expect(parseSearchAnswerOutput('{"text": "## Answer\\n- 3 times\\n1. since 2023–24"}')).toBe("Answer 3 times since 2023–24");
+    // Plain text is left alone: a record, a dash, an underscore inside a word.
+    expect(parseSearchAnswerOutput('{"text": "Went 8-2-0 - ranked #3 in team_name 4215."}')).toBe("Went 8-2-0 - ranked #3 in team_name 4215.");
+  });
   it("null stays null; an over-long answer counts as none; any other shape is malformed", () => {
     expect(parseSearchAnswerOutput('{"text": null}')).toBeNull();
     expect(parseSearchAnswerOutput(JSON.stringify({ text: "x".repeat(601) }))).toBeNull();

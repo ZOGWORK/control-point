@@ -75,7 +75,16 @@ export function parseSearchAnswerOutput(raw: string): string | null {
   if (!data || typeof data !== "object" || Array.isArray(data) || !("text" in data)) throw new Error("malformed_output");
   if (data.text === null) return null;
   if (typeof data.text !== "string") throw new Error("malformed_output");
-  const t = clean(data.text.replace(/\*\*|__|`|^#+\s*/gm, ""));
+  const t = clean(plain(data.text));
   if (!t || t.length > MAX_ANSWER) return null;
   return t;
+}
+
+/** Markdown he slipped in, as plain text: links keep their words, emphasis, code, headings and list markers go. */
+function plain(s: string): string {
+  return s
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*(?:#{1,6}|[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/(\*{1,3}|_{1,3})(?=\S)([^*_]*?\S)\1/g, "$2")
+    .replace(/`+/g, "");
 }
