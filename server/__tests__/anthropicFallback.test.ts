@@ -52,9 +52,12 @@ describe("Bruno's Claude provider", () => {
       { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } },
     ]));
     const chunks: string[] = [];
-    const r = await aiChat({ messages: [{ role: "user", text: "hi" }], maxTokens: 1024, stream: true, onChunk: (c) => chunks.push(c) });
+    const usage: any[] = [];
+    const r = await aiChat({ messages: [{ role: "user", text: "hi" }], maxTokens: 1024, stream: true, onChunk: (c) => chunks.push(c), onUsage: (u) => usage.push(u) });
     expect(r).toMatchObject({ text: "Hello team ✓", provider: "anthropic" });
     expect(chunks).toEqual(["Hello ", "team ✓"]);
+    // The prompt's count (message_start) and the reply's (message_delta) together.
+    expect(usage).toEqual([{ promptTokens: 10, responseTokens: 3, totalTokens: 13 }]);
     const req = lastRequest();
     expect(req.url).toBe("https://api.anthropic.com/v1/messages");
     expect(req.body).toMatchObject({ model: "claude-sonnet-5-5", stream: true, output_config: { effort: "low" }, fallbacks: "default", max_tokens: 1024 });
@@ -102,5 +105,26 @@ describe("Bruno's Claude provider", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err.message).toMatch(/^Anthropic API error 529: overloaded_error: Overloaded/);
     expect(err.aiProvider).toBe("anthropic");
+  });
+});
+
+describe("a streamed reply the caller stops", () => {
+  it("stops at once while waiting for the next chunk, and closes the provider's response", async () => {
+    let cancelled = false;
+    const enc = new TextEncoder();
+    // One chunk, then nothing (a model still thinking): only the stop can end the wait.
+    fetchMock.mockResolvedValue(new Response(new ReadableStream({
+      start(c) { c.enqueue(enc.encode(`event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } })}\n\n`)); },
+      cancel() { cancelled = true; },
+    }), { status: 200, headers: { "content-type": "text/event-stream" } }));
+    const stop = new AbortController();
+    const chunks: string[] = [];
+    const t0 = Date.now();
+    const reply = aiChat({ messages: [{ role: "user", text: "hi" }], maxTokens: 512, stream: true, onChunk: (c) => { chunks.push(c); setTimeout(() => stop.abort(), 20); }, signal: stop.signal });
+    const r = await reply;
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(r.text).toBe("Hel");
+    expect(chunks).toEqual(["Hel"]);
+    expect(cancelled).toBe(true);
   });
 });

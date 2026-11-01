@@ -90,9 +90,11 @@ const SSE_IDLE_TIMEOUT_MS = 30_000;
 
 export async function readStreamChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  idleMs: number = SSE_IDLE_TIMEOUT_MS
+  idleMs: number = SSE_IDLE_TIMEOUT_MS,
+  signal?: AbortSignal
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -100,9 +102,18 @@ export async function readStreamChunk(
         idleMs
       );
     });
-    return await Promise.race([reader.read(), timeout]);
+    // The caller went away (a member's stop, Scout disconnecting): end the wait at once, as a finished stream,
+    // and close the provider's response instead of holding it open until the next chunk or the idle timeout.
+    const aborted = new Promise<ReadableStreamReadResult<Uint8Array>>((resolve) => {
+      if (!signal) return;
+      onAbort = () => { reader.cancel().catch(() => {}); resolve({ done: true, value: undefined }); };
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    });
+    return await Promise.race([reader.read(), timeout, aborted]);
   } finally {
     if (timer) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -265,7 +276,7 @@ async function callGemini(opts: {
     if (opts.signal?.aborted) break;
     let read: ReadableStreamReadResult<Uint8Array>;
     try {
-      read = await readStreamChunk(reader);
+      read = await readStreamChunk(reader, undefined, opts.signal);
     } catch (err) {
       try { await reader.cancel(); } catch { /* noop */ }
       throw err;
@@ -1020,7 +1031,7 @@ export async function buildHelperChat(
     if (signal?.aborted) break;
     let read: ReadableStreamReadResult<Uint8Array>;
     try {
-      read = await readStreamChunk(reader);
+      read = await readStreamChunk(reader, undefined, signal);
     } catch (err) {
       try { await reader.cancel(); } catch { /* noop */ }
       throw err;
