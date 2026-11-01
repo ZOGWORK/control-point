@@ -183,6 +183,8 @@ const MAX_SHORTLIST = 200;
 export const POWER_RANKINGS_RATE = { max: 10, windowMs: 60 * 60 * 1000 };
 /** Calls per hour to /internal/bruno/search-answer: Scout asks only for questions on /search, and caches each answer. */
 export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
+/** Room for the sentence and all six points (seasons, records, decimal OPRs run to many tokens): a cut-off reply is malformed JSON. */
+export const SEARCH_ANSWER_MAX_TOKENS = 900;
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
@@ -583,7 +585,7 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       }
       let raw: string;
       try {
-        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: 400 });
+        raw = await deps.brunoWrite({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM, user: buildSearchAnswerPrompt(packet.value!), maxTokens: SEARCH_ANSWER_MAX_TOKENS });
       } catch (err: any) {
         console.warn("[shared-accounts] search-answer: AI call failed:", String(err?.message || err).slice(0, 200));
         if (/not configured/i.test(String(err?.message || ""))) return res.status(503).json({ error: "ai_unavailable" });

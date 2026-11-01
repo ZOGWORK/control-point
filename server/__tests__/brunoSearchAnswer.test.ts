@@ -6,7 +6,7 @@
 import http from "http";
 import express from "express";
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { createSharedAccounts, SEARCH_ANSWER_RATE } from "../sharedAccounts";
+import { createSharedAccounts, SEARCH_ANSWER_MAX_TOKENS, SEARCH_ANSWER_RATE } from "../sharedAccounts";
 import {
   MAX_FACTS,
   MAX_POINTS,
@@ -148,6 +148,15 @@ describe("route", () => {
     // No answer in the facts: null text, no points.
     expect((await (await boot({ brunoWrite: async () => '{"text": null}' }))(packet())).body).toEqual({ text: null, points: [] });
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "search-answer", system: SEARCH_ANSWER_SYSTEM }));
+  });
+  it("leaves room for a full answer: the sentence and six points come back whole", async () => {
+    const points = Array.from({ length: MAX_POINTS }, (_, i) => `${2019 + i}–${20 + i}: New Jersey Championship - Turnpike Division, ranked #${i + 1}, 4-1-0 in quals, OPR 1${i}2.6, Winning Alliance`);
+    const write = vi.fn(async () => JSON.stringify({ text: "Hypnotic Robotics (4215) went to states 6 times since 2019–20.", points }));
+    const r = await (await boot({ brunoWrite: write }))(packet());
+    expect(r.body.points).toEqual(points);
+    // About 25 tokens a point: the budget holds all six with room to spare.
+    expect(SEARCH_ANSWER_MAX_TOKENS).toBeGreaterThanOrEqual(MAX_POINTS * 60 + 200);
+    expect(write).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: SEARCH_ANSWER_MAX_TOKENS }));
   });
   it("503 when no AI is configured, 502 when it fails or replies off-shape", async () => {
     expect((await (await boot())(packet())).status).toBe(503);
