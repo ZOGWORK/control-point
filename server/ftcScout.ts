@@ -162,6 +162,8 @@ export function normalizeTeamEventStats(
     ties: num(s.ties),
     qualMatchesPlayed: num(s.qualMatchesPlayed),
     opr: normalizePointSplit(s.opr, season),
+    // Unrounded, for the swing (src/utils/consistency.ts): Control Scout's uses the exact OPR.
+    ...(isObj(s.opr) && num(s.opr.totalPointsNp) != null ? { oprNpExact: num(s.opr.totalPointsNp) } : {}),
     avg: normalizePointSplit(s.avg, season),
     awards: arr(raw.awards)
       .map((a) => (isObj(a) ? str(a.type) : null))
@@ -380,6 +382,7 @@ export function mergeEventFull(
       ties: r?.ties ?? s?.ties ?? null,
       qualMatchesPlayed: s?.qualMatchesPlayed ?? null,
       opr: s?.opr ?? null,
+      ...(s?.oprNpExact != null ? { oprNpExact: s.oprNpExact } : {}),
       avg: s?.avg ?? null,
       awards: s?.awards ?? [],
     };

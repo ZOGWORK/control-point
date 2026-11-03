@@ -41,6 +41,8 @@ export interface FtcTeamEventStats {
   ties: number | null;
   qualMatchesPlayed: number | null;
   opr: FtcPointSplit | null;
+  /** The non-penalty OPR unrounded (opr.totalNp is to one decimal): what swing reads, as Control Scout's does. */
+  oprNpExact?: number | null;
   avg: FtcPointSplit | null;
   awards: string[];
 }

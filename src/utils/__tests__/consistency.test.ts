@@ -57,6 +57,17 @@ describe('swing (consistency) in Control Point', () => {
     expect(Object.fromEntries([1, 2, 3, 4].map((t) => [t, [by.get(t)!.matches, by.get(t)!.swing.toFixed(12)]]))).toEqual(PINNED);
   });
 
+  it('reads the exact OPR, not the one-decimal one shown (Scout uses the exact one)', async () => {
+    const { eventConsistency } = await import('@control-scout/predict-engine');
+    const exact: Record<number, number> = { 1: 40.04, 2: 29.96, 3: 20.049, 4: 9.951 };
+    const fractional = { matches, field: [1, 2, 3, 4].map((n) => ({ ...stats(n), opr: { ...split(Math.round(exact[n] * 10) / 10) }, oprNpExact: exact[n] })) };
+    const by = eventSwing(fractional, FIELD_VAR)!;
+    const want = eventConsistency(eventAlliances(ev), (t) => exact[t] ?? null, FIELD_VAR);
+    for (const t of [1, 2, 3, 4]) expect(by.get(t)!.swing).toBe(want.get(t)!.swing);
+    // Without the exact one (an event cached before it was kept), the shown OPR still gives a number.
+    expect(eventSwing({ matches, field: [1, 2, 3, 4].map(stats) }, FIELD_VAR)!.get(1)!.swing.toFixed(12)).toBe(PINNED[1][1]);
+  });
+
   it('below 5 matches: "—" with the reason; no season field: no number at all', () => {
     const by = eventSwing(ev, FIELD_VAR)!;
     expect(swingText(by.get(1))).toBe('±0.24');

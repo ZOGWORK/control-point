@@ -16,7 +16,21 @@ import {
   SCOUT_SEASONS,
   matchLabel,
   type FirstEventPieces,
+  normalizeTeamEventStats,
 } from "../ftcScout";
+
+describe("swing inputs", () => {
+  it("keeps the exact non-penalty OPR beside the one-decimal one (swing reads the exact one)", () => {
+    const s = normalizeTeamEventStats({ teamNumber: 1, name: "A", stats: { opr: { autoPoints: 1, dcPoints: 2, totalPointsNp: 40.0449 } }, awards: [] }, 2025);
+    expect(s.opr?.totalNp).toBe(40);
+    expect(s.oprNpExact).toBe(40.0449);
+    expect(normalizeTeamEventStats({ teamNumber: 1, name: "A", stats: {}, awards: [] }, 2025).oprNpExact).toBeUndefined();
+  });
+
+  it("asks FTC Scout which listed robots were on the field", () => {
+    expect(scoutEventQuery(2025)).toContain("teams { teamNumber station alliance surrogate dq onField }");
+  });
+});
 
 const group2025 = (o: Partial<Record<string, number>>) => ({
   autoPoints: 28.3, dcPoints: 73.4, dcBasePoints: 5.5, penaltyPointsCommitted: -1.5, penaltyPointsByOpp: -7.1, totalPointsNp: 101.6, totalPoints: 94.5, ...o,

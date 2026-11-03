@@ -36,7 +36,8 @@ export function eventAlliances(ev: Pick<FtcEventFull, 'matches'>): ConsistencyAl
 /** Every team's swing at the event (null without the season's field variance: no number rather than a different one). */
 export function eventSwing(ev: Pick<FtcEventFull, 'matches' | 'field'>, fieldVariance: number | null): Map<number, Consistency> | null {
   if (fieldVariance == null || !Number.isFinite(fieldVariance) || fieldVariance < 0) return null;
-  const opr = new Map(ev.field.map((t) => [t.teamNumber, t.opr?.totalNp ?? null]));
+  // The exact OPR (one decimal would move swing); a cached event from before it was kept falls back to the rounded one.
+  const opr = new Map(ev.field.map((t) => [t.teamNumber, t.oprNpExact ?? t.opr?.totalNp ?? null]));
   return eventConsistency(eventAlliances(ev), (t) => opr.get(t) ?? null, fieldVariance);
 }
 

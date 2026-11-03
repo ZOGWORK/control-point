@@ -246,7 +246,7 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
                   <span className="min-w-0 flex-1"><span className="font-medium">{t.teamNumber}</span> <span className="break-words text-sm text-muted-foreground">{t.name}</span></span>
                   <span className="text-right"><span className="block font-display font-semibold text-accent">{fmt(t.opr?.totalNp ?? null)}</span><span className="text-[11px] text-muted-foreground">OPR</span></span>
                   {rel.by.get(t.teamNumber) && <span className="text-right" title={reliabilityTitle(rel.by.get(t.teamNumber)!)}><span className="block font-display font-semibold text-emerald-600 dark:text-emerald-400">{rel.by.get(t.teamNumber)!.index}</span><span className="text-[11px] text-muted-foreground">Reliab.</span></span>}
-                  {swing?.get(t.teamNumber)?.value != null && <span className="text-right" title={swingTitle(swing.get(t.teamNumber))}><span className="block font-display font-semibold tabular-nums">{swingText(swing.get(t.teamNumber))}</span><span className="text-[11px] text-muted-foreground">Swing</span></span>}
+                  <span className="text-right" title={swingTitle(swing?.get(t.teamNumber))}><span className="block font-display font-semibold tabular-nums">{swingText(swing?.get(t.teamNumber))}</span><span className="text-[11px] text-muted-foreground">Swing</span></span>
                 </button>
                 {actionsFor(t)}
               </div>
