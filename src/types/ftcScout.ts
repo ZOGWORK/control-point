@@ -41,12 +41,15 @@ export interface FtcTeamEventStats {
   ties: number | null;
   qualMatchesPlayed: number | null;
   opr: FtcPointSplit | null;
+  /** The non-penalty OPR unrounded (opr.totalNp is to one decimal): what swing reads, as Control Scout's does. */
+  oprNpExact?: number | null;
   avg: FtcPointSplit | null;
   awards: string[];
 }
 
 export interface FtcAllianceScore {
-  teams: { number: number; name: string; surrogate?: boolean; dq?: boolean }[];
+  /** onField false: listed but not on the field (a no-show). Absent: not reported, read as on the field. */
+  teams: { number: number; name: string; surrogate?: boolean; dq?: boolean; onField?: boolean }[];
   score: FtcPointSplit | null;
 }
 

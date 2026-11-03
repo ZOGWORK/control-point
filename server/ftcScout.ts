@@ -73,7 +73,7 @@ export function scoutEventQuery(season: number): string {
       teams { teamNumber team { name } stats { __typename ${teamEventStatsFragment(season)} } awards { type } }
       matches {
         matchNum series tournamentLevel description hasBeenPlayed scheduledStartTime actualStartTime
-        teams { teamNumber station alliance surrogate dq }
+        teams { teamNumber station alliance surrogate dq onField }
         scores { __typename ${matchScoresFragment(season)} }
       }
     }
@@ -162,6 +162,8 @@ export function normalizeTeamEventStats(
     ties: num(s.ties),
     qualMatchesPlayed: num(s.qualMatchesPlayed),
     opr: normalizePointSplit(s.opr, season),
+    // Unrounded, for the swing (src/utils/consistency.ts): Control Scout's uses the exact OPR.
+    ...(isObj(s.opr) && num(s.opr.totalPointsNp) != null ? { oprNpExact: num(s.opr.totalPointsNp) } : {}),
     avg: normalizePointSplit(s.avg, season),
     awards: arr(raw.awards)
       .map((a) => (isObj(a) ? str(a.type) : null))
@@ -227,7 +229,7 @@ export function parseScoutEvent(resp: unknown, season: number): ScoutEventParsed
       arr(m.teams)
         .filter((t): t is Record<string, unknown> => isObj(t) && str(t.alliance) === alliance)
         .sort((a, b) => String(a.station).localeCompare(String(b.station)))
-        .map((t) => ({ number: num(t.teamNumber) as number, name: nameOf(num(t.teamNumber) as number), surrogate: t.surrogate === true, dq: t.dq === true }))
+        .map((t) => ({ number: num(t.teamNumber) as number, name: nameOf(num(t.teamNumber) as number), surrogate: t.surrogate === true, dq: t.dq === true, ...(t.onField === false ? { onField: false } : {}) }))
         .filter((t) => !!t.number);
     const scores = isObj(m.scores) ? m.scores : null;
     const played = m.hasBeenPlayed === true;
@@ -380,6 +382,7 @@ export function mergeEventFull(
       ties: r?.ties ?? s?.ties ?? null,
       qualMatchesPlayed: s?.qualMatchesPlayed ?? null,
       opr: s?.opr ?? null,
+      ...(s?.oprNpExact != null ? { oprNpExact: s.oprNpExact } : {}),
       avg: s?.avg ?? null,
       awards: s?.awards ?? [],
     };
@@ -413,7 +416,7 @@ export function mergeEventFull(
         }
       }
       return {
-        teams: teams.map((n) => ({ number: n, name: nameOf(n), surrogate: scoutSide?.teams.find((t) => t.number === n)?.surrogate, dq: scoutSide?.teams.find((t) => t.number === n)?.dq })),
+        teams: teams.map((n) => { const st = scoutSide?.teams.find((t) => t.number === n); return { number: n, name: nameOf(n), surrogate: st?.surrogate, dq: st?.dq, ...(st?.onField === false ? { onField: false } : {}) }; }),
         score,
       };
     };

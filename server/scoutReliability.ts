@@ -18,7 +18,9 @@ export interface TeamReliability {
   nearZero: number;
   recent: RecentRecord;
 }
-export interface ReliabilityAnswer { season: number; fieldIndex: number | null; teams: TeamReliability[] }
+/** The season's field variance of the swing contributions (Scout's consistencyField): the prior swing is pulled toward. */
+export interface ConsistencyField { variance: number; matches: number }
+export interface ReliabilityAnswer { season: number; fieldIndex: number | null; consistencyField?: ConsistencyField | null; teams: TeamReliability[] }
 
 export const CACHE_MS = 10 * 60_000;
 /** Teams per request (Scout's limit too). */
@@ -43,14 +45,17 @@ export function parseReliability(season: number, body: unknown): ReliabilityAnsw
     });
   }
   const fi = int((body as any).fieldIndex);
-  return { season, fieldIndex: fi != null && fi >= 0 && fi <= 100 ? fi : null, teams };
+  const cf = (body as any).consistencyField;
+  // The variance as Scout sent it (never rounded: the swing must come out the same number in both apps).
+  const consistencyField = cf && typeof cf.variance === "number" && Number.isFinite(cf.variance) && cf.variance >= 0 ? { variance: cf.variance, matches: int(cf.matches) ?? 0 } : null;
+  return { season, fieldIndex: fi != null && fi >= 0 && fi <= 100 ? fi : null, consistencyField, teams };
 }
 
 export function createReliabilityClient(o: { origin: string; fetchImpl?: typeof fetch; now?: () => number }) {
   const fetchImpl = o.fetchImpl ?? fetch;
   const now = o.now ?? Date.now;
   const cache = new Map<string, { at: number; row: TeamReliability | null }>();
-  const field = new Map<number, { at: number; value: number | null }>();
+  const field = new Map<number, { at: number; value: number | null; consistency: ConsistencyField | null }>();
   return {
     /** The teams' reliability (those Scout has), in the order asked. Never throws. */
     async get(season: number, teams: number[]): Promise<ReliabilityAnswer> {
@@ -65,7 +70,7 @@ export function createReliabilityClient(o: { origin: string; fetchImpl?: typeof 
           if (parsed) {
             const by = new Map(parsed.teams.map((r) => [r.team, r]));
             for (const x of missing) cache.set(`${season}:${x}`, { at: t, row: by.get(x) ?? null });
-            field.set(season, { at: t, value: parsed.fieldIndex });
+            field.set(season, { at: t, value: parsed.fieldIndex, consistency: parsed.consistencyField ?? null });
           }
         } catch { /* Scout unreachable: no numbers this time, asked again next time */ }
       }
@@ -75,7 +80,7 @@ export function createReliabilityClient(o: { origin: string; fetchImpl?: typeof 
       const fresh = (at: number | undefined) => at != null && t - at < CACHE_MS;
       const f = field.get(season);
       return {
-        season, fieldIndex: fresh(f?.at) ? f!.value : null,
+        season, fieldIndex: fresh(f?.at) ? f!.value : null, consistencyField: fresh(f?.at) ? f!.consistency : null,
         teams: want.map((x) => cache.get(`${season}:${x}`)).filter((h) => h && fresh(h.at)).map((h) => h!.row).filter((r): r is TeamReliability => !!r),
       };
     },

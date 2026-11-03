@@ -34,7 +34,7 @@ describe('Predict offline', () => {
   it('forecasts on the device with no connection, for our team, and tries the server again next time', async () => {
     api.apiFetch.mockRejectedValue(new TypeError('Failed to fetch'));
     const fc = await fetchForecast(2025, 'USNJQ1', { myTeam: 4215 });
-    expect(sim.forecast).toHaveBeenCalledWith(expect.objectContaining({ code: 'USNJQ1', name: 'NJ Qualifier' }), 4215, 1000);
+    expect(sim.forecast).toHaveBeenCalledWith(expect.objectContaining({ code: 'USNJQ1', name: 'NJ Qualifier' }), 4215, 1000, { factorSheets: true });
     expect(fc).toMatchObject({ eventName: 'NJ Qualifier', myTeam: 4215, offline: { asOf: '2026-10-08T06:00:00.000Z', region: 'New Jersey' } });
     expect((await fetchPartners(2025, 'USNJQ1', { myTeam: 4215 })).role).toBe('captain');
     expect(sim.partners).toHaveBeenCalledWith(expect.objectContaining({ code: 'USNJQ1' }), 4215);

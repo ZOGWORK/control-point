@@ -43,12 +43,13 @@ export async function fetchReliabilityAll(season: number, teams: number[], fetch
   return {
     season,
     fieldIndex: answers.find((a) => a?.fieldIndex != null)?.fieldIndex ?? null,
+    consistencyField: answers.find((a) => a?.consistencyField != null)?.consistencyField ?? null,
     teams: answers.flatMap((a) => a?.teams ?? []),
   };
 }
 
 /** Team → reliability for the teams given (empty until it loads, and on any failure). */
-export function useReliability(season: number | null, teams: number[]): { by: Map<number, TeamReliability>; fieldIndex: number | null } {
+export function useReliability(season: number | null, teams: number[]): { by: Map<number, TeamReliability>; fieldIndex: number | null; fieldVariance: number | null } {
   const list = useMemo(() => [...new Set(teams.filter((t) => t > 0))].sort((a, b) => a - b), [teams]);
   const key = list.join(',');
   const [answer, setAnswer] = useState<ReliabilityAnswer | null>(null);
@@ -59,7 +60,7 @@ export function useReliability(season: number | null, teams: number[]): { by: Ma
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [season, key]);
-  return useMemo(() => ({ by: new Map((answer?.teams ?? []).map((r) => [r.team, r])), fieldIndex: answer?.fieldIndex ?? null }), [answer]);
+  return useMemo(() => ({ by: new Map((answer?.teams ?? []).map((r) => [r.team, r])), fieldIndex: answer?.fieldIndex ?? null, fieldVariance: answer?.consistencyField?.variance ?? null }), [answer]);
 }
 
 /** "Reliability 79/100 (est., 26 quals)" for a title or caption. */
