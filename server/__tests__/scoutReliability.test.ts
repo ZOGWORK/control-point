@@ -14,6 +14,12 @@ describe('parseReliability', () => {
     expect(p.teams).toEqual([{ team: 1, index: 80, matches: 20, noShows: 1, dqs: 0, nearZero: 2, recent: { matches: 10, noShows: 1, nearZero: 2 } }]);
     expect(parseReliability(2025, { nope: true })).toBeNull();
   });
+
+  it("passes the season's swing field variance through unrounded (the swing's prior), and only a sane one", () => {
+    const v = 0.06123456789012345;
+    expect(parseReliability(2025, { fieldIndex: 75, consistencyField: { variance: v, matches: 4012 }, teams: [] })!.consistencyField).toEqual({ variance: v, matches: 4012 });
+    for (const bad of [null, { variance: -1 }, { variance: 'x' }, { variance: Infinity }]) expect(parseReliability(2025, { consistencyField: bad, teams: [] })!.consistencyField).toBeNull();
+  });
 });
 
 describe('reliability client', () => {
@@ -47,14 +53,14 @@ describe('reliability client', () => {
     t = CACHE_MS - 1; // still fresh: served from the cache, Scout not asked
     expect(await c.get(2025, [1])).toMatchObject({ fieldIndex: 75, teams: [{ team: 1 }] });
     t = CACHE_MS; // expired, and the refresh fails
-    expect(await c.get(2025, [1])).toEqual({ season: 2025, fieldIndex: null, teams: [] });
+    expect(await c.get(2025, [1])).toEqual({ season: 2025, fieldIndex: null, consistencyField: null, teams: [] });
     up = true;
     expect((await c.get(2025, [1])).teams).toHaveLength(1);
   });
 
   it('gives no numbers, never an error, when Scout fails', async () => {
     const down = createReliabilityClient({ origin: 'https://scout.test', fetchImpl: (async () => { throw new Error('down'); }) as unknown as typeof fetch });
-    expect(await down.get(2025, [1])).toEqual({ season: 2025, fieldIndex: null, teams: [] });
+    expect(await down.get(2025, [1])).toEqual({ season: 2025, fieldIndex: null, consistencyField: null, teams: [] });
     const bad = createReliabilityClient({ origin: 'https://scout.test', fetchImpl: (async () => new Response('nope', { status: 500 })) as unknown as typeof fetch });
     expect((await bad.get(2025, [1])).teams).toEqual([]);
   });

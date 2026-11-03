@@ -73,7 +73,7 @@ export function scoutEventQuery(season: number): string {
       teams { teamNumber team { name } stats { __typename ${teamEventStatsFragment(season)} } awards { type } }
       matches {
         matchNum series tournamentLevel description hasBeenPlayed scheduledStartTime actualStartTime
-        teams { teamNumber station alliance surrogate dq }
+        teams { teamNumber station alliance surrogate dq onField }
         scores { __typename ${matchScoresFragment(season)} }
       }
     }
@@ -227,7 +227,7 @@ export function parseScoutEvent(resp: unknown, season: number): ScoutEventParsed
       arr(m.teams)
         .filter((t): t is Record<string, unknown> => isObj(t) && str(t.alliance) === alliance)
         .sort((a, b) => String(a.station).localeCompare(String(b.station)))
-        .map((t) => ({ number: num(t.teamNumber) as number, name: nameOf(num(t.teamNumber) as number), surrogate: t.surrogate === true, dq: t.dq === true }))
+        .map((t) => ({ number: num(t.teamNumber) as number, name: nameOf(num(t.teamNumber) as number), surrogate: t.surrogate === true, dq: t.dq === true, ...(t.onField === false ? { onField: false } : {}) }))
         .filter((t) => !!t.number);
     const scores = isObj(m.scores) ? m.scores : null;
     const played = m.hasBeenPlayed === true;
@@ -413,7 +413,7 @@ export function mergeEventFull(
         }
       }
       return {
-        teams: teams.map((n) => ({ number: n, name: nameOf(n), surrogate: scoutSide?.teams.find((t) => t.number === n)?.surrogate, dq: scoutSide?.teams.find((t) => t.number === n)?.dq })),
+        teams: teams.map((n) => { const st = scoutSide?.teams.find((t) => t.number === n); return { number: n, name: nameOf(n), surrogate: st?.surrogate, dq: st?.dq, ...(st?.onField === false ? { onField: false } : {}) }; }),
         score,
       };
     };

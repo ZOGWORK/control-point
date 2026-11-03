@@ -46,7 +46,8 @@ export interface FtcTeamEventStats {
 }
 
 export interface FtcAllianceScore {
-  teams: { number: number; name: string; surrogate?: boolean; dq?: boolean }[];
+  /** onField false: listed but not on the field (a no-show). Absent: not reported, read as on the field. */
+  teams: { number: number; name: string; surrogate?: boolean; dq?: boolean; onField?: boolean }[];
   score: FtcPointSplit | null;
 }
 

@@ -4,7 +4,7 @@
 // sortable table or cards), Team detail (the Modern TeamProfile) and the
 // workspace's scouting shortlist. Teams peek in a side sheet. Deliberately no
 // compare mode, comparison table or compare action.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Bookmark, Bot, CalendarDays, ChevronLeft, ChevronRight, History, Pin, Search, Users, X } from 'lucide-react';
 import { cn } from '../../../components/cn';
 import {
@@ -24,6 +24,7 @@ import { TeamProfile } from './TeamProfile';
 import { MatchDetailSheet, MatchLine, OfficialSourceLinks, RankMedal, SeasonToggle, SourceLine, TeamMenu, officialEventLinks } from './statsUi';
 import { ShortlistBoard } from './ShortlistBoard';
 import { reliabilityTitle, useReliability } from '../../../services/reliabilityApi';
+import { eventSwing, SWING_LINE, swingText, swingTitle } from '../../../utils/consistency';
 
 type Ctl = ReturnType<typeof useAnalyzeController>;
 
@@ -167,6 +168,8 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
   const { ev } = f;
   // Reliability (Control Scout's estimate) beside OPR: a number only where Scout has one.
   const rel = useReliability(season, ev?.field.map((t) => t.teamNumber) ?? []);
+  // Swing (Control Scout's consistency stat) from this event's own matches, by the shared engine's function.
+  const swing = useMemo(() => (ev ? eventSwing(ev, rel.fieldVariance) : null), [ev, rel.fieldVariance]);
 
   if (!code) return <EmptyState icon={CalendarDays} title="No event selected" description="Pick an event above (it lists the events of the searched team, or your own team's events)." />;
   if (f.loading && !ev) return <div className="space-y-2" aria-busy="true" aria-label="Loading event field"><Skeleton className="h-20" />{Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-12" />)}</div>;
@@ -243,6 +246,7 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
                   <span className="min-w-0 flex-1"><span className="font-medium">{t.teamNumber}</span> <span className="break-words text-sm text-muted-foreground">{t.name}</span></span>
                   <span className="text-right"><span className="block font-display font-semibold text-accent">{fmt(t.opr?.totalNp ?? null)}</span><span className="text-[11px] text-muted-foreground">OPR</span></span>
                   {rel.by.get(t.teamNumber) && <span className="text-right" title={reliabilityTitle(rel.by.get(t.teamNumber)!)}><span className="block font-display font-semibold text-emerald-600 dark:text-emerald-400">{rel.by.get(t.teamNumber)!.index}</span><span className="text-[11px] text-muted-foreground">Reliab.</span></span>}
+                  {swing?.get(t.teamNumber)?.value != null && <span className="text-right" title={swingTitle(swing.get(t.teamNumber))}><span className="block font-display font-semibold tabular-nums">{swingText(swing.get(t.teamNumber))}</span><span className="text-[11px] text-muted-foreground">Swing</span></span>}
                 </button>
                 {actionsFor(t)}
               </div>
@@ -260,7 +264,7 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
           <Table>
             <TableHeader>
               <TableRow>
-                {sortHead('rank', 'Rank', undefined, false)}{sortHead('number', 'Team', undefined, false)}{sortHead('opr', 'OPR')}<TableHead className="text-right" title="Reliability: Control Scout's 0–100 estimate from match results (no-shows, DQs, near-zero matches, swing, penalties)">Reliab.</TableHead>{sortHead('auto', 'Auto')}{sortHead('teleop', 'TeleOp')}{sortHead('endgame', 'Endgame')}
+                {sortHead('rank', 'Rank', undefined, false)}{sortHead('number', 'Team', undefined, false)}{sortHead('opr', 'OPR')}<TableHead className="text-right" title="Reliability: Control Scout's 0–100 estimate from match results (no-shows, DQs, near-zero matches, swing, penalties)">Reliab.</TableHead><TableHead className="text-right" title={SWING_LINE}>Swing</TableHead>{sortHead('auto', 'Auto')}{sortHead('teleop', 'TeleOp')}{sortHead('endgame', 'Endgame')}
                 <TableHead className="text-right">W-L-T</TableHead>{sortHead('rp', 'RP')}{sortHead('avgScore', 'Avg score')}{sortHead('avgPen', 'Avg pen.', 'Average penalty points given per match')}
                 <TableHead><span className="sr-only">Actions</span></TableHead>
               </TableRow>
@@ -279,6 +283,7 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
                     </TableCell>
                     <TableCell className="text-right font-medium tabular-nums text-accent">{fmt(t.opr?.totalNp ?? null)}</TableCell>
                     <TableCell className="text-right tabular-nums text-emerald-600 dark:text-emerald-400" title={rel.by.get(t.teamNumber) ? reliabilityTitle(rel.by.get(t.teamNumber)!) : 'No reliability estimate yet'}>{rel.by.get(t.teamNumber)?.index ?? '—'}</TableCell>
+                    <TableCell className="text-right tabular-nums" title={swingTitle(swing?.get(t.teamNumber))}>{swingText(swing?.get(t.teamNumber))}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(t.opr?.auto ?? null)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(t.opr?.teleop ?? null)}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmt(t.opr?.endgame ?? null)}</TableCell>
@@ -294,6 +299,8 @@ function EventFieldView({ season, code, myTeam, ctl }: { season: number; code: s
           </Table>
         </div>
       )}
+
+      {f.rows.length > 0 && swing && <p className="text-xs text-muted-foreground" data-swing-line>{SWING_LINE}</p>}
 
       {f.pages > 1 && (
         <nav className="flex items-center justify-center gap-3 text-sm" aria-label="Pagination">
