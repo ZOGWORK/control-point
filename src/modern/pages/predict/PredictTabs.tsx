@@ -9,6 +9,7 @@ import { useIsNarrow } from '../../../components/scout/ScoutUi';
 import { pct, preMatchCall, rankRange, usePartners } from '../../../components/predict/usePredictController';
 import type { ForecastView } from '../../../services/predictApi';
 import { recentReasons } from '@control-scout/predict-engine/explain';
+import { DEFAULT_MARGIN } from '@control-scout/predict-engine/matchModel';
 import { useReliability } from '../../../services/reliabilityApi';
 import { EmptyState, Stat } from '../../ui/page';
 import { Stagger, StaggerItem } from '../../ui/motion';
@@ -310,7 +311,7 @@ export function MatchesTab({ fc, myTeam }: FcProps) {
           </div>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">Upcoming matches show predicted scores with their 80% range (±) and win odds; played ones show the result and whether the pre-match call held.</p>
+      <p className="text-xs text-muted-foreground">Upcoming matches show predicted scores with their 80% range (±) and win odds; played ones show the result and whether the pre-match call held. Predicted margins are calibrated: both scores move toward their middle so the margin is {DEFAULT_MARGIN.scale} of the rating gap (the total stays the same; win odds use the gap).</p>
       {!(fc.matches ?? []).length ? <EmptyState icon={Swords} title="No matches yet" description="The match schedule appears here once it's published." /> : !list.length ? (
         <EmptyState
           icon={Swords}

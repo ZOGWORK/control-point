@@ -39,7 +39,7 @@ const ev: Pick<FtcEventFull, 'matches' | 'field'> = { matches, field: [1, 2, 3, 
 
 describe('swing (consistency) in Control Point', () => {
   it('runs the shared engine at the version Control Scout ships', () => {
-    expect(ENGINE_VERSION).toBe('3.4.0');
+    expect(ENGINE_VERSION).toBe('3.5.0');
   });
 
   it('the event becomes the engine fixture: played quals in play order, red then blue, no-shows off the field', () => {
