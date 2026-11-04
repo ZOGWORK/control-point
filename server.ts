@@ -186,7 +186,7 @@ import {
   matchKey,
 } from "./server/ftcEvents.js";
 import { PredictEngine, type Forecast, type Partners } from "./server/predict/engine.js";
-import { ENGINE_VERSION, FITTED_MODEL } from "@control-scout/predict-engine";
+import { DEFAULT_MARGIN, ENGINE_VERSION, FITTED_MODEL } from "@control-scout/predict-engine";
 import { PredictStore } from "./server/predict/store.js";
 import { syncSeasons, dataAsOf } from "./server/predict/sync.js";
 import { OfflinePackBuilder, buildPack, detectRegion, listRegions, type PackedEvent } from "./server/offline/pack.js";
@@ -6696,12 +6696,13 @@ async function startServer() {
     predictMonitor.checkDrift(predictLive, predictBaseline());
   }
   /** Forecast an event, record its snapshots, and annotate played matches with their pre-match odds. */
-  function forecastAndRecord(ev: Parameters<typeof predictEngine.forecast>[0], myTeam: number | null): Forecast | null {
+  function forecastAndRecord(ev: Parameters<typeof predictEngine.forecast>[0], myTeam: number | null): (Forecast & { marginScale: number }) | null {
     // With each unplayed match's full why breakdown (engine 3.3), for Predict → Matches.
     const fc = predictEngine.forecast(ev, myTeam, undefined, { factorSheets: true });
     if (!fc) return null;
     if (eventStillOpen(ev.end)) predictMonitor.record(fc, new Date(), predictEngine.storedPlayedKeys(ev.season, ev.code));
-    return predictMonitor.annotate(fc);
+    // The margin calibration behind its predicted scores (engine 3.5), so Predict can say so only for calibrated ones.
+    return { ...predictMonitor.annotate(fc), marginScale: (FITTED_MODEL.margin ?? DEFAULT_MARGIN).scale };
   }
   /**
    * Snapshot events that are on now or start within a day, so their

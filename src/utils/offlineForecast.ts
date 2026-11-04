@@ -7,6 +7,7 @@ import type { AwardRecord } from '../../server/predict/awards';
 import type { OfflinePack, OfflinePredict } from '../types/offlinePack';
 import type { BonusModelSource } from '@control-scout/predict-engine';
 import { PartnershipTable } from '@control-scout/predict-engine';
+import { DEFAULT_MARGIN } from '@control-scout/predict-engine/matchModel';
 
 /** Fewer runs than the server (2000): the device may be a phone. */
 export const OFFLINE_RUNS = 1000;
@@ -18,6 +19,9 @@ export class OfflineForecaster extends Forecaster {
   private readonly regions: Map<string, string>;
   private readonly played: Map<string, Set<string>>;
   private readonly pairTable: PartnershipTable | null;
+
+  /** Margin calibration behind this forecaster's predicted scores (engine 3.5; a pack's model without it uses the default). */
+  get marginScale(): number { return (this.model.margin ?? DEFAULT_MARGIN).scale; }
 
   constructor(private pack: OfflinePack & { predict: OfflinePredict }) {
     super();

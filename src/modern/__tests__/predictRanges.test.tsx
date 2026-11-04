@@ -34,3 +34,18 @@ describe('Predict matches: score ranges', () => {
     expect(screen.queryByText(/\d ±\d/)).toBeNull();
   });
 });
+
+describe('Predict matches: margin calibration (engine 3.5)', () => {
+  const showFc = (extra: object) =>
+    render(<MemoryRouter><MatchesTab fc={{ matches: [upcoming('Q1', 120, 90, band(100, 140), band(70, 110))], ...extra } as unknown as ForecastView} myTeam={null} /></MemoryRouter>);
+
+  it("says the margins are calibrated, with the forecast's own scale", () => {
+    showFc({ marginScale: 0.95 });
+    expect(screen.getByText(/margin is 0\.95 of the rating gap/)).toBeTruthy();
+  });
+
+  it('says nothing about calibration for a forecast saved before 3.5 (no scale on it)', () => {
+    showFc({});
+    expect(screen.queryByText(/calibrated/)).toBeNull();
+  });
+});
