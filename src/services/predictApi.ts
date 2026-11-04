@@ -18,6 +18,9 @@ export type ForecastView = Forecast & {
    * (`region` null). `asOf` = when its data is from.
    */
   offline?: { asOf: string; region: string | null };
+  /** Margin calibration behind redMean/blueMean (engine 3.5+: shown margin = this × the rating gap). Absent on
+   *  forecasts saved before 3.5, whose scores are uncalibrated: say nothing about calibration for those. */
+  marginScale?: number;
 };
 
 export interface PredictAccuracy {
@@ -91,7 +94,7 @@ export function fetchForecast(season: number, code: string, opts?: { force?: boo
   const onDevice = (e: unknown, newerThan?: string) => offlinePredict<ForecastView>(e, season, code, (f, ev, asOf, region, runs) => {
     const myTeam = opts?.myTeam ?? null;
     const fc = f.forecast(ev, myTeam, runs, { factorSheets: true });
-    return fc && { ...fc, eventName: ev.name, eventStart: ev.start, eventEnd: ev.end, myTeam, offline: { asOf, region } };
+    return fc && { ...fc, eventName: ev.name, eventStart: ev.start, eventEnd: ev.end, myTeam, offline: { asOf, region }, marginScale: f.marginScale };
   }, newerThan);
   return forecastCache.get(`${season}:${code}`, async () => {
     let got: { body: ForecastView; saved: boolean };

@@ -310,7 +310,7 @@ export function MatchesTab({ fc, myTeam }: FcProps) {
           </div>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">Upcoming matches show predicted scores with their 80% range (±) and win odds; played ones show the result and whether the pre-match call held.</p>
+      <p className="text-xs text-muted-foreground">Upcoming matches show predicted scores with their 80% range (±) and win odds; played ones show the result and whether the pre-match call held.{fc.marginScale != null && fc.marginScale !== 1 && <> Predicted margins are calibrated: both scores move toward their middle so the margin is {fc.marginScale} of the rating gap (the total stays the same; win odds use the gap).</>}</p>
       {!(fc.matches ?? []).length ? <EmptyState icon={Swords} title="No matches yet" description="The match schedule appears here once it's published." /> : !list.length ? (
         <EmptyState
           icon={Swords}

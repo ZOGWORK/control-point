@@ -45,7 +45,7 @@ export function FactorSheetPanel({ sheet, className }: { sheet: FactorSheet; cla
         )}
         <div className="grid gap-4 @3xl:grid-cols-2 @3xl:gap-x-8">
           <div className="space-y-4">
-            <Section title="Game phases" note="An exact split of the predicted margin">{sheet.phases.map((f) => <Row key={f.id} f={f} top={top} />)}</Section>
+            <Section title="Game phases" note="An exact split of the rating gap behind the margin">{sheet.phases.map((f) => <Row key={f.id} f={f} top={top} />)}</Section>
             <Section title="Reasons that don't move the odds">{sheet.reasons.map((f) => <Row key={f.id} f={f} top={top} />)}</Section>
           </div>
           {sheet.model.length > 0 && (
