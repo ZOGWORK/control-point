@@ -223,6 +223,35 @@ describe("several workspaces → a picker", () => {
     expect(again.body.workspaces.filter((w: any) => w.lastUsed).map((w: any) => w.id)).toEqual([String(b)]);
   });
 
+  it("two choices sent at once with the same pick: exactly one signs in", async () => {
+    const { jar } = await finish(email);
+    const post = (workspaceId: string) => raw(on, "/api/auth/control-scout/choose", {
+      method: "POST", headers: { cookie: jar.header(), "content-type": "application/json", "x-cp-client": "1" }, body: JSON.stringify({ workspaceId }),
+    });
+    const sessions = Number((await one("SELECT COUNT(*) AS n FROM sessions")).n);
+    const results = await Promise.all(Array.from({ length: 10 }, (_, i) => post(String(i % 2 ? b : a))));
+    expect(results.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(results.filter((r) => r.status === 410)).toHaveLength(9);
+    expect(Number((await one("SELECT COUNT(*) AS n FROM sessions")).n)).toBe(sessions + 1);
+  });
+
+  it("a membership stored with another email casing is listed and can be picked", async () => {
+    const c = await seedTeam(on.db, "Case Crew");
+    const d = await seedTeam(on.db, "Case Two");
+    await seedMember(on.db, c, "Casey", "Mixed.Case@Team.TEST", "admin");
+    await seedMember(on.db, d, "Casey", "mixed.case@team.test");
+    const { cb, jar } = await finish("mixed.case@team.test");
+    expect(cb.location).toBe("/?scout_pick=1");
+    const list = await raw(on, "/api/auth/control-scout/workspaces", { headers: { cookie: jar.header() } });
+    expect(list.body.workspaces.map((w: any) => [w.name, w.role])).toEqual([["Case Crew", "admin"], ["Case Two", "member"]]);
+    const chose = await raw(on, "/api/auth/control-scout/choose", {
+      method: "POST", headers: { cookie: jar.header(), "content-type": "application/json", "x-cp-client": "1" }, body: JSON.stringify({ workspaceId: String(c) }),
+    });
+    expect(chose.status).toBe(200);
+    jar.take(chose.cookies);
+    expect((await me(jar)).user.team_id).toBe(c);
+  });
+
   it("no pick or an unknown one is 410, and choosing needs the client header (CSRF)", async () => {
     expect((await raw(on, "/api/auth/control-scout/workspaces")).status).toBe(410);
     expect((await raw(on, "/api/auth/control-scout/workspaces", { headers: { cookie: `cp_scout_pick=${"0".repeat(64)}` } })).status).toBe(410);

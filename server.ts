@@ -4162,7 +4162,7 @@ async function startServer() {
   const SCOUT_PICK_COOKIE = "cp_scout_pick";
   const SCOUT_PICK_PATH = "/api/auth/control-scout";
   const SCOUT_PICK_TTL_MS = 10 * 60 * 1000;
-  const pendingScoutPicks = new Map<string, { accountId: number; email: string; name: string; popup: boolean; expiry: number }>();
+  const pendingScoutPicks = new Map<string, { email: string; name: string; popup: boolean; expiry: number }>();
   const scoutPickCookie = (req: any, token: string | null) =>
     `${SCOUT_PICK_COOKIE}=${token ?? ''}; Path=${SCOUT_PICK_PATH}; HttpOnly; SameSite=Lax; Max-Age=${token ? SCOUT_PICK_TTL_MS / 1000 : 0}${requestIsHttps(req) ? '; Secure' : ''}`;
   /** The pick this browser is in the middle of, if it's still live. */
@@ -4208,7 +4208,7 @@ async function startServer() {
     const now = Date.now();
     for (const [k, v] of pendingScoutPicks) if (v.expiry < now) pendingScoutPicks.delete(k);
     const token = randomHex(32);
-    pendingScoutPicks.set(token, { accountId: s.accountId, email: s.email, name, popup: !!popup, expiry: now + SCOUT_PICK_TTL_MS });
+    pendingScoutPicks.set(token, { email: s.email, name, popup: !!popup, expiry: now + SCOUT_PICK_TTL_MS });
     res.append("Set-Cookie", scoutPickCookie(req, token));
     res.redirect("/?scout_pick=1");
   }
@@ -4218,30 +4218,46 @@ async function startServer() {
     res.setHeader("Cache-Control", "no-store");
     const pick = scoutPickFor(req);
     if (!pick) return res.status(410).json({ error: "This sign-in expired — continue with Control Scout again." });
-    const account = await sharedAccounts.loadAccount(pick.accountId);
+    // The same rows the choice route accepts, so every workspace listed can be picked.
     const rows = await activeMemberRows(pick.email);
     // "Last used" only from a real record of use (pickMemberRow's fallback, the newest row, isn't one).
     const ids = rows.map((r) => r.id);
     const used = ids.length ? (await dbGet(`SELECT member_id FROM member_last_used WHERE member_id IN (${ids.map(() => "?").join(",")}) ORDER BY used_at DESC LIMIT 1`, ...ids).catch(() => null)) as any : null;
     const last = used ? rows.find((r) => r.id === used.member_id) : null;
-    // loadAccount's workspaces and controlPoint.teams come from one query, in the same order.
-    const workspaces = (account?.workspaces || []).map((w, i) => ({
-      id: w.id, name: w.name, role: w.role,
-      teamNumber: account!.controlPoint.teams[i]?.teamNumber ?? null,
-      lastUsed: last ? String(last.team_id) === w.id : false,
-    }));
-    res.json({ email: pick.email, name: pick.name || null, workspaces });
+    const byTeam = new Map<number, { id: string; name: string; role: "admin" | "member"; teamNumber: number | null; lastUsed: boolean }>();
+    for (const r of [...rows].sort((a, b) => Number(a.team_id) - Number(b.team_id))) {
+      const teamId = Number(r.team_id);
+      // Admin by the workspace rule (a "*" or manage_members role, or the legacy admin flag), as everywhere else.
+      const perms = await getMemberPerms(r.id, teamId);
+      const admin = perms.has("*") || perms.has("manage_members");
+      const seen = byTeam.get(teamId);
+      if (seen) { if (admin) seen.role = "admin"; continue; }
+      const team = (await dbGet("SELECT name, ftc_team_number FROM teams WHERE id = ?", teamId)) as any;
+      if (!team) continue;
+      const n = Number(team.ftc_team_number);
+      byTeam.set(teamId, {
+        id: String(teamId), name: String(team.name ?? ""), role: admin ? "admin" : "member",
+        teamNumber: Number.isInteger(n) && n > 0 ? n : null,
+        lastUsed: !!last && Number(last.team_id) === teamId,
+      });
+    }
+    res.json({ email: pick.email, name: pick.name || null, workspaces: [...byTeam.values()] });
   });
 
   // The picker's choice: sign in to that workspace.
   app.post("/api/auth/control-scout/choose", async (req, res) => {
     const pick = scoutPickFor(req);
     if (!pick) return res.status(410).json({ error: "This sign-in expired — continue with Control Scout again." });
+    // Single use: claim the pick before any await, so a concurrent replay of the cookie finds it gone.
+    const { token, ...entry } = pick;
+    pendingScoutPicks.delete(token);
     const teamId = Number(req.body?.workspaceId);
     const rows = Number.isInteger(teamId) && teamId > 0 ? (await activeMemberRows(pick.email)).filter((r) => Number(r.team_id) === teamId) : [];
-    if (!rows.length) return res.status(400).json({ error: "You're not a member of that workspace." });
-    // Single use: the cookie's pick is spent by this choice.
-    pendingScoutPicks.delete(pick.token);
+    if (!rows.length) {
+      // Not theirs: nothing was signed in, so the pick stays usable for a valid choice.
+      pendingScoutPicks.set(token, entry);
+      return res.status(400).json({ error: "You're not a member of that workspace." });
+    }
     res.append("Set-Cookie", scoutPickCookie(req, null));
     const member = await pickMemberRow(rows);
     const sessionId = await scoutSignInAs(pick.email, pick.name, member.id);
