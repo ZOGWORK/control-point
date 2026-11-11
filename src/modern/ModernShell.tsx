@@ -601,7 +601,7 @@ function WorkspaceSwitcher({ collapsed, teams, activeTeam, activeTeamName, onSwi
             collapsed ? 'size-10 justify-center' : 'h-10 flex-1 px-2',
           )}
         >
-          <img src="/logo.png?v=3" alt="" className="size-6 shrink-0 rounded-md" />
+          <img src="/logo.png?v=4" alt="" className="size-6 shrink-0 rounded-md" />
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-base">{activeTeamName || 'Control Point'}</span>
