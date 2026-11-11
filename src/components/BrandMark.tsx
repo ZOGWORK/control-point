@@ -5,9 +5,9 @@ import { cn } from './ui';
 /**
  * BrandMark — the Control Point logo slot.
  *
- * Sushil is designing the real logo in Canva. Drop the export at
- * `public/logo.png` and it is picked up automatically (no code change);
- * until then the built-in bolt mark renders.
+ * The logo is `public/logo.png` (graphite tile, volt hex "C" with a center
+ * point, matching Control Scout). If it fails to load, the built-in bolt
+ * mark renders in the same colors.
  *
  * Includes the mini BETA badge next to the wordmark (intentionally tiny).
  */
@@ -34,14 +34,15 @@ function LogoImage({ className, decorative = false }: { className?: string; deco
   const [missing, setMissing] = useState(false);
   if (missing) {
     return (
-      <div className={cn('bg-accent rounded-2xl flex items-center justify-center gold-glow flex-shrink-0', className)}>
-        <Bolt className="text-accent-ink w-6 h-6" strokeWidth={2.5} />
+      // Same look as /logo.png: graphite tile, volt mark (the Control Scout family style).
+      <div className={cn('bg-[#111110] rounded-2xl flex items-center justify-center flex-shrink-0', className)}>
+        <Bolt className="text-[#fed305] w-6 h-6" strokeWidth={2.5} />
       </div>
     );
   }
   return (
     <img
-      src="/logo.png?v=3"
+      src="/logo.png?v=4"
       alt={decorative ? '' : 'Control Point logo'}
       onError={() => setMissing(true)}
       className={cn('object-contain flex-shrink-0', className)}

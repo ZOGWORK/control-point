@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
-import { Bolt, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { BrandLogo } from './components/BrandMark';
 
 /** Branded page for paths the app doesn't have. The server answers these
  *  with a 404 status; this is what a person sees. App sets the tab title. */
@@ -7,9 +8,7 @@ export default function NotFoundPage({ signedIn }: { signedIn: boolean }) {
   return (
     <div className="min-h-screen bg-primary text-text-base flex items-center justify-center px-4">
       <main className="max-w-md text-center">
-        <span className="mx-auto mb-6 w-12 h-12 rounded-2xl bg-accent flex items-center justify-center">
-          <Bolt className="w-6 h-6 text-accent-ink" strokeWidth={2.75} aria-hidden="true" />
-        </span>
+        <BrandLogo className="mx-auto mb-6 w-12 h-12 rounded-2xl" decorative />
         <p className="text-sm font-semibold text-accent mb-2">404</p>
         <h1 className="font-display text-3xl font-bold tracking-tight mb-3">Page not found</h1>
         <p className="text-text-muted mb-8">
