@@ -5,27 +5,31 @@
 // hooks. Text fields are drafted (not passwords), so going back a step or
 // switching looks keeps them.
 import { PasswordChecklist } from '../../ui/PasswordChecklist';
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
-  ArrowRight, BadgeCheck, Check, Eye, EyeOff, GraduationCap, KeyRound, Loader2, Mail, ShieldCheck,
+  ArrowRight, BadgeCheck, Check, ChevronRight, Eye, EyeOff, GraduationCap, KeyRound, Loader2, Mail, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../../../components/cn';
 import {
   Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Input, Label,
 } from '../../../components/ui-kit';
-import { oauthUrl } from '../../../services/api';
+import { apiFetch, oauthUrl } from '../../../services/api';
 import { controlKitConnectPending, openOAuthWindow } from '../../../utils/controlKitConnect';
+import { CONTROL_SCOUT_ICON } from '../../../utils/controlScout';
 import { DiscordIcon, GithubIcon, GoogleIcon } from '../../../components/auth/ProviderIcons';
 import {
   lookupNote,
-  PROVIDER_LABEL, useForgotPassword, useOAuthSignup, useSignupForm, useTeamLookup, useVerifyEmail, type OAuthProvider,
+  PROVIDER_LABEL, SIGNUP_PROVIDER_LABEL, useForgotPassword, useOAuthSignup, useSignupForm, useTeamLookup, useVerifyEmail,
+  type OAuthProvider, type SignupProvider,
 } from '../../../components/auth/useAuthForms';
 import { AuthHeading, AuthLayout, FormError, OrDivider } from './AuthLayout';
 
-export type Providers = { google: boolean; discord: boolean; github: boolean };
+/** Sign-in options the server has on: the OAuth providers, and `scout` for "Continue with Control Scout". */
+export type Providers = { google: boolean; discord: boolean; github: boolean; scout?: boolean };
 const anyProvider = (p: Providers) => p.google || p.discord || p.github;
-const PROVIDER_ICON: Record<OAuthProvider, () => ReactNode> = { google: GoogleIcon, discord: DiscordIcon, github: GithubIcon };
+const ScoutIcon = () => <img src={CONTROL_SCOUT_ICON} alt="" aria-hidden className="size-5 rounded" />;
+const PROVIDER_ICON: Record<SignupProvider, () => ReactNode> = { google: GoogleIcon, discord: DiscordIcon, github: GithubIcon, 'control-scout': ScoutIcon };
 
 /** One field: label above, optional hint below. */
 function Field({ label, hint, children, htmlFor, extra }: { label: string; hint?: ReactNode; children: ReactNode; htmlFor: string; extra?: ReactNode }) {
@@ -83,6 +87,24 @@ function ProviderButtons({ providers, intent }: { providers: Providers; intent: 
   );
 }
 
+/**
+ * "Continue with Control Scout": one click for someone with a Control Scout account. Scout vouches
+ * for whoever is signed in there; they land in their workspace (or pick one, or set one up).
+ */
+function ScoutButton({ intent }: { intent: 'login' | 'signup' }) {
+  return (
+    <Button asChild variant="outline" className="h-11 w-full">
+      <a
+        href={oauthUrl(`/api/auth/control-scout?intent=${intent}`)}
+        // Linking Control Kit: sign in from a window of its own, so its popup stays here.
+        onClick={(e) => { if (controlKitConnectPending() && openOAuthWindow(e.currentTarget.href)) e.preventDefault(); }}
+      >
+        <ScoutIcon /> Continue with Control Scout
+      </a>
+    </Button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sign in (and first-time password setup)
 
@@ -126,10 +148,13 @@ export function SignInPage(p: {
         </Button>
       </form>
       {p.oauthError && !p.needsSetup && <div className="mt-4"><FormError>{p.oauthError}</FormError></div>}
-      {anyProvider(p.providers) && !p.needsSetup && (
+      {(anyProvider(p.providers) || p.providers.scout) && !p.needsSetup && (
         <>
           <OrDivider label="or continue with" />
-          <ProviderButtons providers={p.providers} intent="login" />
+          <div className="grid gap-2">
+            {p.providers.scout && <ScoutButton intent="login" />}
+            {anyProvider(p.providers) && <ProviderButtons providers={p.providers} intent="login" />}
+          </div>
         </>
       )}
       <p className="mt-8 text-center text-sm text-muted-foreground">
@@ -333,11 +358,18 @@ export function RolePage({ onBack, onSelect, providers }: {
           </motion.button>
         ))}
       </div>
-      {anyProvider(providers) && (
+      {(anyProvider(providers) || providers.scout) && (
         <>
           <OrDivider label="or sign up with" />
-          <ProviderButtons providers={providers} intent="signup" />
-          <p className="mt-2 text-center text-xs text-muted-foreground">You'll pick admin or member right after.</p>
+          <div className="grid gap-2">
+            {providers.scout && <ScoutButton intent="signup" />}
+            {anyProvider(providers) && <ProviderButtons providers={providers} intent="signup" />}
+          </div>
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            {providers.scout
+              ? "With Control Scout, your email, name and team come with you. You'll pick admin or member if you need to."
+              : "You'll pick admin or member right after."}
+          </p>
         </>
       )}
     </AuthLayout>
@@ -490,22 +522,27 @@ export function SignupPage({ mode, onBack, onSignup, onDone, onSignIn, invite }:
 // ---------------------------------------------------------------------------
 // Finish an OAuth signup
 
-export function OAuthSignupPage({ token, intent, provider, onBack, onDone, invite }: {
-  token: string; intent: 'admin_signup' | 'student_signup' | 'signup'; provider: OAuthProvider;
+export function OAuthSignupPage({ token, intent, provider, onBack, onDone, invite, teamNumber }: {
+  token: string; intent: 'admin_signup' | 'student_signup' | 'signup'; provider: SignupProvider;
   onBack: () => void; onDone: (data: any) => void;
   /** Finishing a signup that started from an invite link. */
   invite?: { token: string; teamName?: string } | null;
+  /** The FTC team the person follows in Control Scout ("Continue with Control Scout"), filled in. */
+  teamNumber?: string | null;
 }) {
-  const f = useOAuthSignup({ token, intent, provider, onDone, inviteToken: invite?.token });
+  const f = useOAuthSignup({ token, intent, provider, onDone, inviteToken: invite?.token, initialTeamNumber: teamNumber });
   const Icon = PROVIDER_ICON[provider];
+  const label = SIGNUP_PROVIDER_LABEL[provider];
   return (
     <AuthLayout onBack={onBack} backLabel="Home">
       <AuthHeading
         icon={<span className="inline-flex size-11 items-center justify-center rounded-xl border border-border bg-card"><Icon /></span>}
         title="One more step"
         description={f.viaInvite
-          ? `You're signed in with ${PROVIDER_LABEL[provider]}. Finish to join ${invite?.teamName || 'your team'}.`
-          : `You're signed in with ${PROVIDER_LABEL[provider]}. Tell us about your team to finish.`}
+          ? `You're signed in with ${label}. Finish to join ${invite?.teamName || 'your team'}.`
+          : provider === 'control-scout' && teamNumber
+            ? `You're signed in with ${label}. We filled in team ${teamNumber}, the team you follow there. Check it to finish.`
+            : `You're signed in with ${label}. Tell us about your team to finish.`}
       />
       <form onSubmit={f.submit} className="grid gap-5">
         <fieldset disabled={f.busy} className="grid gap-5">
@@ -544,6 +581,96 @@ export function OAuthSignupPage({ token, intent, provider, onBack, onDone, invit
           {f.busy ? <><Loader2 className="animate-spin" /> Creating account…</> : f.isAdmin ? 'Create workspace' : 'Join team'}
         </Button>
       </form>
+    </AuthLayout>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Continue with Control Scout: the account is on several workspaces, so pick one
+
+type ScoutWorkspace = { id: string; name: string; role: 'admin' | 'member'; teamNumber: number | null; lastUsed: boolean };
+
+export function ScoutPickPage({ onBack, onSignedIn }: { onBack: () => void; onSignedIn: (popup: boolean) => void }) {
+  const [data, setData] = useState<{ email: string; workspaces: ScoutWorkspace[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [choosing, setChoosing] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    apiFetch('/api/auth/control-scout/workspaces')
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "We couldn't load your workspaces. Try again.");
+        if (live) setData(d);
+      })
+      .catch((e) => { if (live) setError(e.message || "We couldn't load your workspaces. Try again."); });
+    return () => { live = false; };
+  }, []);
+  const choose = async (id: string) => {
+    if (choosing) return;
+    setError(null);
+    setChoosing(id);
+    try {
+      const r = await apiFetch('/api/auth/control-scout/choose', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspaceId: id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "We couldn't open that workspace. Try again.");
+      onSignedIn(!!d.popup);
+    } catch (e: any) {
+      setError(e.message || "We couldn't open that workspace. Try again.");
+      setChoosing(null);
+    }
+  };
+  return (
+    <AuthLayout onBack={onBack} backLabel="Home">
+      <AuthHeading
+        icon={<span className="inline-flex size-11 items-center justify-center rounded-xl border border-border bg-card"><ScoutIcon /></span>}
+        title="Choose a workspace"
+        description={data
+          ? <>You're signed in with Control Scout as <span className="font-medium text-foreground">{data.email}</span>. You're on {data.workspaces.length} teams here: pick one to open. You can switch any time.</>
+          : 'Signed in with Control Scout. Finding your teams…'}
+      />
+      {!data && !error && (
+        <div className="grid gap-2" aria-hidden="true">
+          {[0, 1].map((i) => <div key={i} className="h-[4.5rem] animate-pulse rounded-2xl border border-border bg-card" />)}
+        </div>
+      )}
+      {data && (
+        <ul className="grid gap-2" aria-label="Your workspaces">
+          {data.workspaces.map((w, i) => (
+            <motion.li key={w.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }}>
+              <button
+                type="button"
+                onClick={() => void choose(w.id)}
+                disabled={!!choosing}
+                className="group flex min-h-[4.5rem] w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-60"
+              >
+                <IconTile tone={w.role === 'admin' ? 'accent' : 'sky'}>
+                  {w.role === 'admin' ? <ShieldCheck className="size-5" /> : <GraduationCap className="size-5" />}
+                </IconTile>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate font-medium">{w.name || 'Workspace'}</span>
+                    {w.lastUsed && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Last used</span>}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {w.teamNumber ? `Team ${w.teamNumber} · ` : ''}{w.role === 'admin' ? 'Admin' : 'Member'}
+                  </span>
+                </span>
+                {choosing === w.id
+                  ? <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                  : <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />}
+              </button>
+            </motion.li>
+          ))}
+        </ul>
+      )}
+      {error && (
+        <div className="mt-4 grid gap-3">
+          <FormError>{error}</FormError>
+          {!data && <ScoutButton intent="login" />}
+        </div>
+      )}
     </AuthLayout>
   );
 }

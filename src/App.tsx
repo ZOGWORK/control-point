@@ -69,7 +69,7 @@ import { TourCard } from './modern/pages/onboarding/TourCard';
 import { clearSetupDrafts } from './components/onboarding/useSetupWizard';
 import { clearTourDraft } from './components/onboarding/useWalkthrough';
 import { ModernLanding } from './modern/pages/auth/ModernLanding';
-import { OAuthSignupPage, RolePage, SignInPage, SignupPage, VerifyEmailPage } from './modern/pages/auth/AuthPages';
+import { OAuthSignupPage, RolePage, ScoutPickPage, SignInPage, SignupPage, VerifyEmailPage } from './modern/pages/auth/AuthPages';
 import { CodeRevealDialog } from './modern/pages/auth/CodeRevealDialog';
 import { TeamlessPage } from './modern/pages/auth/TeamlessPage';
 import { ControlKitConsentPage } from './modern/pages/connect/ControlKitConsentPage';
@@ -908,16 +908,21 @@ export default function App() {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [discordEnabled, setDiscordEnabled] = useState(false);
   const [githubEnabled, setGithubEnabled] = useState(false);
+  const [scoutEnabled, setScoutEnabled] = useState(false);
   const [youtubeEnabled, setYoutubeEnabled] = useState(false);
   const [tiktokEnabled, setTiktokEnabled] = useState(false);
   const [oauthError, setOauthError] = useState<string | null>(null);
-  const [oauthSignup, setOauthSignup] = useState<{ token: string; intent: 'admin_signup' | 'student_signup' | 'signup'; provider: 'google' | 'discord' | 'github' } | null>(null);
+  const [oauthSignup, setOauthSignup] = useState<{ token: string; intent: 'admin_signup' | 'student_signup' | 'signup'; provider: 'google' | 'discord' | 'github' | 'control-scout'; teamNumber?: string } | null>(null);
+  // "Continue with Control Scout" found several workspaces for the account: pick one (the server holds the pick in a cookie).
+  const [scoutPick, setScoutPick] = useState(false);
 
   const OAUTH_ERROR_MESSAGES: Record<string, string> = {
     not_invited: 'This account is not registered yet — create an account to get started.',
     email_unverified: 'We need a verified email from that provider — verify your email there and try again.',
     account_removed: 'This account was removed — contact your team admin.',
     invalid_state: 'Sign-in expired — please try again.',
+    scout_unavailable: "Signing in with Control Scout isn't available right now. Use another way to sign in.",
+    scout_failed: "Control Scout couldn't sign you in. Try again, or use another way to sign in.",
   };
 
   // Handle OAuth callbacks (?oauth=ok / ?oauth_error= / ?oauth_signup=, plus legacy google_* params)
@@ -928,6 +933,7 @@ export default function App() {
         setGoogleEnabled(!!d.googleEnabled);
         setDiscordEnabled(!!d.discordEnabled);
         setGithubEnabled(!!d.githubEnabled);
+        setScoutEnabled(!!d.scoutEnabled);
         setYoutubeEnabled(!!d.youtubeEnabled);
         setTiktokEnabled(!!d.tiktokEnabled);
       })
@@ -943,13 +949,19 @@ export default function App() {
     const gsu = params.get('oauth_signup') || params.get('google_signup');
     const gi = params.get('intent');
     const gp = params.get('provider');
-    const provider = gp === 'discord' || gp === 'github' ? gp : 'google';
+    const provider = gp === 'discord' || gp === 'github' || gp === 'control-scout' ? gp : 'google';
     if (ge) {
       setOauthError(OAUTH_ERROR_MESSAGES[ge] || 'Sign-in failed. Please try again.');
       window.history.replaceState({}, '', window.location.pathname);
     }
+    if (params.get('scout_pick') === '1') {
+      setScoutPick(true);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     if (gsu && (gi === 'admin_signup' || gi === 'student_signup' || gi === 'signup')) {
-      setOauthSignup({ token: gsu, intent: gi, provider });
+      // ?team=: the FTC team a Control Scout sign-up follows there, to fill in.
+      const team = provider === 'control-scout' && /^\d{1,6}$/.test(params.get('team') || '') ? params.get('team')! : undefined;
+      setOauthSignup({ token: gsu, intent: gi, provider, teamNumber: team });
       window.history.replaceState({}, '', window.location.pathname);
     }
     // Restore the session from the cookie. A device signed in before the
@@ -2444,7 +2456,7 @@ export default function App() {
     // step first. This must come before the landing screen or the callback
     // bounces them back to the homepage.
     // Unverified email+password account: prove ownership before any session.
-    const providers = { google: googleEnabled, discord: discordEnabled, github: githubEnabled };
+    const providers = { google: googleEnabled, discord: discordEnabled, github: githubEnabled, scout: scoutEnabled };
     if (verifyState) {
       const onVerified = (data: any) => {
         persistSession(data.sessionId, data.user);
@@ -2471,10 +2483,15 @@ export default function App() {
       const invite = peekInvite();
       return (
         <OAuthSignupPage
-          token={oauthSignup.token} intent={oauthSignup.intent} provider={oauthSignup.provider} onBack={onBack} onDone={onDone}
+          token={oauthSignup.token} intent={oauthSignup.intent} provider={oauthSignup.provider} teamNumber={oauthSignup.teamNumber} onBack={onBack} onDone={onDone}
           invite={invite ? { token: invite, teamName: inviteTeamName || undefined } : null}
         />
       );
+    }
+    if (scoutPick) {
+      // Signed in on the chosen workspace (the session cookie is set): start the app the way an OAuth sign-in does.
+      const onSignedIn = (popup: boolean) => window.location.replace(`/?oauth=ok${popup ? '&popup=1' : ''}`);
+      return <ScoutPickPage onBack={() => { setScoutPick(false); setAuthScreen('landing'); }} onSignedIn={onSignedIn} />;
     }
     const pendingInvite = peekInvite();
     if (authScreen === 'landing' && (pendingInvite || invitePendingTeam)) {

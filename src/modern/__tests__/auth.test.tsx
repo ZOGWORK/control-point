@@ -6,7 +6,7 @@ const api = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('../../services/api', async (orig) => ({ ...(await orig<object>()), ...api }));
 
 import { ModernLanding } from '../pages/auth/ModernLanding';
-import { OAuthSignupPage, RolePage, SignInPage, SignupPage, VerifyEmailPage } from '../pages/auth/AuthPages';
+import { OAuthSignupPage, RolePage, ScoutPickPage, SignInPage, SignupPage, VerifyEmailPage } from '../pages/auth/AuthPages';
 import { CodeRevealDialog } from '../pages/auth/CodeRevealDialog';
 import { TeamlessPage } from '../pages/auth/TeamlessPage';
 import { AuthLayout } from '../pages/auth/AuthLayout';
@@ -365,3 +365,68 @@ describe('Modern zero-team screen', () => {
   });
 });
 
+
+describe('Continue with Control Scout', () => {
+  it('Get Started and sign-in show the button only when the server has it on', () => {
+    const v = render(<RolePage providers={{ ...providers, scout: true }} onBack={vi.fn()} onSelect={vi.fn()} />);
+    expect(screen.getByRole('link', { name: 'Continue with Control Scout' })).toHaveAttribute('href', '/api/auth/control-scout?intent=signup');
+    expect(screen.getByText(/your email, name and team come with you/)).toBeInTheDocument();
+    v.unmount();
+    // Scout alone (no OAuth providers) still gets its own row.
+    const w = render(<RolePage providers={{ google: false, discord: false, github: false, scout: true }} onBack={vi.fn()} onSelect={vi.fn()} />);
+    expect(screen.getByRole('link', { name: 'Continue with Control Scout' })).toBeInTheDocument();
+    w.unmount();
+    render(<RolePage providers={providers} onBack={vi.fn()} onSelect={vi.fn()} />);
+    expect(screen.queryByRole('link', { name: 'Continue with Control Scout' })).not.toBeInTheDocument();
+    cleanup();
+    render(
+      <SignInPage email="" setEmail={vi.fn()} password="" setPassword={vi.fn()} needsSetup={false} error={null} busy={false}
+        onSubmit={vi.fn()} oauthError={null} providers={{ ...providers, scout: true }} showForgot={false} setShowForgot={vi.fn()}
+        onPasswordReset={vi.fn()} onBack={vi.fn()} onCreateAccount={vi.fn()} />,
+    );
+    expect(screen.getByRole('link', { name: 'Continue with Control Scout' })).toHaveAttribute('href', '/api/auth/control-scout?intent=login');
+  });
+
+  it('no workspace yet: the team step says Control Scout and fills in the followed team as admin', async () => {
+    render(<OAuthSignupPage token="tok" intent="signup" provider="control-scout" teamNumber="4215" onBack={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByText(/signed in with Control Scout\. We filled in team 4215/)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Team admin/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('FTC team number')).toHaveValue('4215');
+  });
+
+  it('several workspaces: lists them, then signs in to the one picked', async () => {
+    const onSignedIn = vi.fn();
+    api.apiFetch.mockImplementation((url: string) => url === '/api/auth/control-scout/workspaces'
+      ? json({ email: 'multi@team.test', workspaces: [
+        { id: '3', name: 'Alpha Bots', role: 'admin', teamNumber: null, lastUsed: true },
+        { id: '7', name: 'Beta Builders', role: 'member', teamNumber: 4215, lastUsed: false },
+      ] })
+      : json({ ok: true, popup: false }));
+    render(<ScoutPickPage onBack={vi.fn()} onSignedIn={onSignedIn} />);
+    expect(await screen.findByRole('button', { name: /Beta Builders/ })).toHaveTextContent('Team 4215 · Member');
+    expect(screen.getByRole('button', { name: /Alpha Bots/ })).toHaveTextContent('Last used');
+    expect(screen.getByText(/You're on 2 teams here/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Beta Builders/ }));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(false));
+    expect(body('/api/auth/control-scout/choose')).toEqual({ workspaceId: '7' });
+  });
+
+  it('an expired pick says so and offers to start again', async () => {
+    api.apiFetch.mockImplementation(() => json({ error: 'This sign-in expired — continue with Control Scout again.' }, false));
+    render(<ScoutPickPage onBack={vi.fn()} onSignedIn={vi.fn()} />);
+    expect(await screen.findByText(/This sign-in expired/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Continue with Control Scout' })).toBeInTheDocument();
+  });
+
+  it('a refused choice shows the error and the list stays usable', async () => {
+    const onSignedIn = vi.fn();
+    api.apiFetch.mockImplementation((url: string) => url === '/api/auth/control-scout/workspaces'
+      ? json({ email: 'm@t.test', workspaces: [{ id: '3', name: 'Alpha Bots', role: 'admin', teamNumber: null, lastUsed: false }, { id: '7', name: 'Beta', role: 'member', teamNumber: null, lastUsed: false }] })
+      : json({ error: "You're not a member of that workspace." }, false));
+    render(<ScoutPickPage onBack={vi.fn()} onSignedIn={onSignedIn} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Alpha Bots/ }));
+    expect(await screen.findByText(/not a member of that workspace/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Beta/ })).not.toBeDisabled();
+    expect(onSignedIn).not.toHaveBeenCalled();
+  });
+});
