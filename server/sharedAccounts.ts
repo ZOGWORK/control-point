@@ -98,6 +98,26 @@
  *     Same aiChat path as the power rankings (offline, system actor), logged
  *     in ai_usage as endpoint "search-answer".
  *
+ * Continue with Control Scout (Control Point's sign-in and Get Started; the reverse of the hand-off):
+ *
+ *   GET /api/auth/control-scout?intent=… (server.ts) binds a state to this browser (the usual
+ *   cp_oauth_state cookie) and sends it to ${CONTROL_SCOUT_URL}/api/auth/control-point/vouch?state=….
+ *   Scout signs its visitor in if needed, then vouches for them server to server:
+ *
+ *   POST /internal/signin/codes
+ *     body { email, verifiedBy, state, displayName?, myTeam? }
+ *       verifiedBy: how Scout proved the email ("scout-email-code" | "google" | "discord" | "github" |
+ *       "control-point"); state: the one Control Point sent (16..128 of [A-Za-z0-9_-]);
+ *       displayName: <= 100 characters; myTeam: the FTC team the person follows in Scout (1..999999).
+ *     200 { code, expiresAt }   a single-use code (csv_…, 2-minute TTL, sha256-hashed at rest) bound
+ *       to that state. The shared account is upserted as by accounts/resolve.
+ *     400 { error: "invalid_email" | "invalid_verified_by" | "invalid_state" | "invalid_display_name" | "invalid_team" }
+ *   Scout then sends the browser to /api/auth/control-scout/callback?code=…&state=… (or ?error=…&state=…
+ *   when it can't vouch). Control Point redeems the code itself (redeemSigninCode), checks the state
+ *   against the browser's cookie, and signs the person in by that email: one active workspace →
+ *   straight in; several → they pick one; none → the usual team setup. Nothing in this module creates a
+ *   session or a members row; server.ts does, through its normal sign-in paths.
+ *
  * Env:
  *   CONTROL_SCOUT_INTERNAL_KEY  shared secret (32+ chars) Scout sends as
  *                               X-Internal-Key. Unset → /internal/* is 404.
@@ -197,6 +217,11 @@ export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
 const SCOUT_VERIFIERS = new Set(["scout-email-code", "google"]);
+/** How Scout may say it proved an email when it vouches for a sign-in here (its own proofs, plus the ones Control Point ran for it). */
+const SIGNIN_VERIFIERS = new Set(["scout-email-code", "google", "discord", "github", "control-point"]);
+/** "Continue with Control Scout": a vouch code lives this long. */
+export const SIGNIN_CODE_TTL_MS = 2 * 60 * 1000;
+const SIGNIN_CODE_RE = /^csv_[A-Za-z0-9_-]{43}$/;
 const STATE_RE = /^[A-Za-z0-9_-]{16,128}$/;
 const CODE_RE = /^cph_[A-Za-z0-9_-]{43}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -249,6 +274,22 @@ export function keyMatches(given: unknown, expected: string): boolean {
 
 export const hashHandoffCode = (code: string) => crypto.createHash("sha256").update(code).digest("hex");
 export const newHandoffCode = () => "cph_" + crypto.randomBytes(32).toString("base64url");
+export const newSigninCode = () => "csv_" + crypto.randomBytes(32).toString("base64url");
+
+/** Scout's followed FTC team: a team number 1..999999, null when absent; anything else is invalid (undefined). */
+export function cleanMyTeam(v: unknown): number | null | undefined {
+  if (v === undefined || v === null || v === "") return null;
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d{1,6}$/.test(v) ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 999999 ? n : undefined;
+}
+
+/** What a redeemed "Continue with Control Scout" code says about the person. */
+export interface ScoutSignin {
+  accountId: number;
+  email: string;
+  displayName: string | null;
+  myTeam: number | null;
+}
 
 /** Normalised email if well formed, else null. */
 export function cleanEmail(v: unknown): string | null {
@@ -488,6 +529,32 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       res.json({ account });
     });
 
+    // "Continue with Control Scout": Scout vouches for its signed-in visitor (see the contract above).
+    router.post("/signin/codes", async (req, res) => {
+      const body = req.body || {};
+      const email = cleanEmail(body.email);
+      if (!email) return res.status(400).json({ error: "invalid_email" });
+      if (typeof body.verifiedBy !== "string" || !SIGNIN_VERIFIERS.has(body.verifiedBy)) {
+        return res.status(400).json({ error: "invalid_verified_by" });
+      }
+      if (!isHandoffState(body.state)) return res.status(400).json({ error: "invalid_state" });
+      const name = cleanDisplayName(body.displayName);
+      if (!name.ok) return res.status(400).json({ error: "invalid_display_name" });
+      const myTeam = cleanMyTeam(body.myTeam);
+      if (myTeam === undefined) return res.status(400).json({ error: "invalid_team" });
+      await upsertAccount(email, body.verifiedBy, name.value);
+      const code = newSigninCode();
+      const t = now();
+      const expiresAt = new Date(t + SIGNIN_CODE_TTL_MS).toISOString();
+      await deps.dbRun(
+        "INSERT INTO scout_signin_codes (code_hash, email, display_name, my_team, state, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+        hashHandoffCode(code), email, name.value, myTeam, body.state, expiresAt,
+      );
+      // Old codes are useless after their TTL; keep the table small.
+      await deps.dbRun("DELETE FROM scout_signin_codes WHERE expires_at < ?", new Date(t - 60 * 60 * 1000).toISOString()).catch(() => {});
+      res.json({ code, expiresAt });
+    });
+
     router.get("/workspaces/:workspaceId/members", async (req, res) => {
       const teamId = cleanId(req.params.workspaceId);
       if (!teamId) return res.status(400).json({ error: "invalid_workspace" });
@@ -698,5 +765,40 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
     await issueHandoff(res, origin, email, provider, state);
   }
 
-  return { internalRouter, registerStartRoute, completeOAuthHandoff, upsertAccount, loadAccount };
+  /**
+   * Redeem a "Continue with Control Scout" code at the callback. Any attempt spends the code (as
+   * with the hand-off), so a leaked code without its state is worthless afterwards.
+   */
+  async function redeemSigninCode(code: unknown, state: unknown): Promise<{ ok: true; signin: ScoutSignin } | { ok: false; error: string }> {
+    if (typeof code !== "string" || !SIGNIN_CODE_RE.test(code) || !isHandoffState(state)) return { ok: false, error: "invalid_code" };
+    const hash = hashHandoffCode(code);
+    const row = await deps.dbGet("SELECT email, display_name, my_team, state, expires_at FROM scout_signin_codes WHERE code_hash = ?", hash);
+    if (!row) return { ok: false, error: "invalid_code" };
+    const t = iso();
+    const spent = await deps.dbRun("UPDATE scout_signin_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL", t, hash);
+    if (!spent.changes) return { ok: false, error: "code_used" };
+    if (String(row.expires_at) <= t) return { ok: false, error: "code_expired" };
+    if (String(row.state) !== state) return { ok: false, error: "state_mismatch" };
+    const email = cleanEmail(row.email);
+    const acc = email ? await deps.dbGet("SELECT id FROM accounts WHERE email = ?", email) : null;
+    if (!email || !acc) return { ok: false, error: "invalid_code" };
+    await deps.dbRun("UPDATE accounts SET last_seen_at = ? WHERE id = ?", t, acc.id);
+    const myTeam = cleanMyTeam(row.my_team == null ? null : Number(row.my_team));
+    return {
+      ok: true,
+      signin: { accountId: Number(acc.id), email, displayName: row.display_name == null ? null : String(row.display_name), myTeam: myTeam ?? null },
+    };
+  }
+
+  /** Whether "Continue with Control Scout" can run: Scout's origin is known and Scout can reach /internal. */
+  const scoutSigninEnabled = () => !!scoutOriginFrom(env) && !!internalKeyFrom(env);
+
+  /** Where a "Continue with Control Scout" sign-in goes to be vouched for, or null when it's off. */
+  function scoutVouchUrl(state: string): string | null {
+    const origin = scoutOriginFrom(env);
+    if (!origin || !internalKeyFrom(env) || !isHandoffState(state)) return null;
+    return `${origin}/api/auth/control-point/vouch?${new URLSearchParams({ state })}`;
+  }
+
+  return { internalRouter, registerStartRoute, completeOAuthHandoff, upsertAccount, loadAccount, redeemSigninCode, scoutSigninEnabled, scoutVouchUrl };
 }

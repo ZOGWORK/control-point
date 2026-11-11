@@ -82,7 +82,7 @@ import { CLOSE_FENCE, FINISH_BLOCK_TOKENS, finishBlockPrompt, finishCutReply, on
 import { extractRememberBlocks, isDuplicateFact, memoryPromptBlock, nudgeText, localHourAndDay, MAX_USER_MEMORIES, MAX_TEAM_MEMORIES, MAX_FACT_CHARS } from "./server/brunoMemory.js";
 import { quoteUntrusted } from "./server/scoutingContext.js";
 import { serveDist } from "./server/staticAssets.js";
-import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom } from "./server/sharedAccounts.js";
+import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom, type ScoutSignin } from "./server/sharedAccounts.js";
 import { createReliabilityClient } from "./server/scoutReliability.js";
 import { deleteAgeSql, isAdult, setAdult } from "./server/ageConfirm.js";
 import { estimateTokens, fitToRequestBytes, fitToWindow, geminiInputTokens, anthropicInputTokens, providerTooLargeMessage, sanitizeBrunoAttachments } from "./server/brunoInput.js";
@@ -2463,9 +2463,11 @@ async function startServer() {
   app.get("/api/invites/preview/:token", limit(authLimiter, "invitepeek", [byIp(60, 15 * MIN)]));
   app.post("/api/invites/accept", limit(authLimiter, "join", [byIp(20, 15 * MIN)]));
   app.post("/api/teams/request-join", limit(authLimiter, "reqjoin", [byIp(20, 15 * MIN)]));
-  for (const p of ["/api/auth/google", "/api/auth/discord", "/api/auth/github"]) {
+  for (const p of ["/api/auth/google", "/api/auth/discord", "/api/auth/github", "/api/auth/control-scout"]) {
     app.get(p, limit(authLimiter, "oauthstart", [byIp(40, 15 * MIN)]));
   }
+  app.get("/api/auth/control-scout/workspaces", limit(authLimiter, "scoutpick", [byIp(60, 15 * MIN)]));
+  app.post("/api/auth/control-scout/choose", limit(authLimiter, "scoutpick", [byIp(60, 15 * MIN)]));
 
   // ---- Session cookie + CSRF guard (every /api request) ----
   // 1. Any session a route issues (login, signup, verify, team switch…) is
@@ -3542,6 +3544,8 @@ async function startServer() {
     discord: { idColumn: "discord_id", label: "Discord" },
     github: { idColumn: "github_id", label: "GitHub" },
   };
+  // "Continue with Control Scout": not an OAuth provider (no provider id), but a new account finishes through the same team step.
+  const SCOUT_PROVIDER = "control-scout";
 
   function randomHex(bytes: number): string {
     const b = new Uint8Array(bytes);
@@ -3620,6 +3624,8 @@ async function startServer() {
       githubEnabled: !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET),
       youtubeEnabled: !!YOUTUBE_API_KEY,
       tiktokEnabled: TIKTOK_ENABLED && !!(TIKTOK_CLIENT_KEY && TIKTOK_CLIENT_SECRET),
+      // "Continue with Control Scout": Scout's origin is set and it can reach /internal.
+      scoutEnabled: sharedAccounts.scoutSigninEnabled(),
     });
   });
 
@@ -3819,7 +3825,12 @@ async function startServer() {
       if (!pending || pending.expiry < Date.now() || pending.provider !== provider) {
         return res.status(400).json({ error: "Signup expired — please try again" });
       }
-      const idColumn = OAUTH_PROVIDERS[provider].idColumn;
+      // The provider's id column, stored on the new membership. "Continue with Control Scout"
+      // signs up by its verified email alone: it has no provider id to store.
+      const idColumn = OAUTH_PROVIDERS[provider]?.idColumn ?? null;
+      const idCol = idColumn ? `, ${idColumn}` : '';
+      const idVal = idColumn ? ', ?' : '';
+      const idArg = idColumn ? [pending.providerSub] : [];
       const cleanEmail = (pending.email || '').trim();
       const cleanName = (pending.name || '').trim() || cleanEmail.split('@')[0];
       if (!cleanEmail) return res.status(400).json({ error: "Signup expired — please try again" });
@@ -3865,8 +3876,8 @@ async function startServer() {
         const teamId = await insertTeamClaimingFtc({ name: identity.name, number: identity.number, access_code: code, ftc_team_number: identity.ftcNumber, navgpt_enabled: 0 });
         if (teamId == null) return retryable(409, ftcTakenBody(identity.ftcNumber));
         const mInfo = (await dbRun(
-          `INSERT INTO members (team_id, name, role, email, password, ${idColumn}, is_setup, is_board, account_type, scopes, avatar_url) VALUES (?, ?, ?, ?, NULL, ?, 1, 1, 'admin', ?, ?)`,
-          teamId, cleanName, 'Admin', cleanEmail, pending.providerSub, JSON.stringify(['attendance', 'budget', 'tasks', 'inventory', 'code', 'admin']), pending.avatarUrl || null
+          `INSERT INTO members (team_id, name, role, email, password${idCol}, is_setup, is_board, account_type, scopes, avatar_url) VALUES (?, ?, ?, ?, NULL${idVal}, 1, 1, 'admin', ?, ?)`,
+          teamId, cleanName, 'Admin', cleanEmail, ...idArg, JSON.stringify(['attendance', 'budget', 'tasks', 'inventory', 'code', 'admin']), pending.avatarUrl || null
         )) as any;
         const sessionId = await createSession(mInfo.lastInsertRowid);
         await assignSystemRole(teamId, mInfo.lastInsertRowid, "Admin");
@@ -3897,8 +3908,8 @@ async function startServer() {
         if (dupe) return res.status(400).json({ error: "This account is already on that team — sign in instead" });
         if (invite && !(await consumeInvite(invite))) return res.status(400).json({ error: INVITE_STATE_MESSAGE.used_up });
         const mInfo = (await dbRun(
-          `INSERT INTO members (team_id, name, role, email, password, ${idColumn}, is_setup, is_board, account_type, scopes, avatar_url) VALUES (?, ?, ?, ?, NULL, ?, 1, 0, 'student', ?, ?)`,
-          team.id, cleanName, 'Member', cleanEmail, pending.providerSub, JSON.stringify([]), pending.avatarUrl || null
+          `INSERT INTO members (team_id, name, role, email, password${idCol}, is_setup, is_board, account_type, scopes, avatar_url) VALUES (?, ?, ?, ?, NULL${idVal}, 1, 0, 'student', ?, ?)`,
+          team.id, cleanName, 'Member', cleanEmail, ...idArg, JSON.stringify([]), pending.avatarUrl || null
         )) as any;
         const sessionId = await createSession(mInfo.lastInsertRowid);
         await assignSystemRole(team.id, mInfo.lastInsertRowid, "Member");
@@ -4056,7 +4067,8 @@ async function startServer() {
   // Generic OAuth completion (Discord/GitHub); the Google route below delegates here too.
   app.post("/api/auth/oauth/complete", async (req, res) => {
     const provider = String(req.body?.provider || "");
-    if (!OAUTH_PROVIDERS[provider]) return res.status(400).json({ error: "Unknown provider" });
+    // control-scout: the team step of "Continue with Control Scout" for someone with no workspace yet.
+    if (!OAUTH_PROVIDERS[provider] && provider !== SCOUT_PROVIDER) return res.status(400).json({ error: "Unknown provider" });
     await completeOAuthSignup(provider, req, res);
   });
 
@@ -4105,6 +4117,152 @@ async function startServer() {
   // Back-compat: the old Google-only completion route now delegates to the generic one.
   app.post("/api/auth/google/complete", async (req, res) => {
     await completeOAuthSignup('google', req, res);
+  });
+
+  // ---- Continue with Control Scout (contract: server/sharedAccounts.ts) ----
+  // Signs someone in with their Control Scout account in one click, the way
+  // Scout's "Continue with Control Point" works the other way round. Scout
+  // vouches for its signed-in visitor (a single-use code bound to this
+  // browser's state); the person then lands by their email:
+  //   one active workspace → signed straight in;
+  //   several → they pick one (a short-lived HttpOnly pick cookie, no token in a URL);
+  //   none → the usual team step, as after a new Google sign-up, with the FTC
+  //          team they follow in Scout filled in.
+  app.get("/api/auth/control-scout", (req, res) => {
+    const intent = req.query.intent === 'signup' ? 'signup' : 'login';
+    const state = randomHex(16);
+    const vouch = sharedAccounts.scoutVouchUrl(state);
+    if (!vouch) return res.redirect("/?oauth_error=scout_unavailable");
+    startOAuthState(req, res, state, { expiry: Date.now() + 10 * 60 * 1000, intent, provider: SCOUT_PROVIDER, popup: req.query.popup === '1' });
+    res.redirect(vouch);
+  });
+
+  app.get("/api/auth/control-scout/callback", async (req, res) => {
+    try {
+      const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+      const pending = takeOAuthState(req, res, state);
+      if (!pending || pending.expiry < Date.now() || pending.provider !== SCOUT_PROVIDER) {
+        return res.redirect("/?oauth_error=invalid_state");
+      }
+      // Scout couldn't vouch (sign-in cancelled, Scout misconfigured): say so, nothing else.
+      if (req.query.error || typeof req.query.code !== 'string') return res.redirect("/?oauth_error=scout_failed");
+      const r = await sharedAccounts.redeemSigninCode(req.query.code, state);
+      if ('error' in r) {
+        console.warn(`[scout-signin] code refused: ${r.error}`);
+        return res.redirect(`/?oauth_error=${r.error === 'code_expired' ? 'invalid_state' : 'scout_failed'}`);
+      }
+      await finishScoutSignin(r.signin, req, res, pending.popup);
+    } catch (error) {
+      console.error("Control Scout sign-in error:", error);
+      res.redirect("/?oauth_error=oauth_failed");
+    }
+  });
+
+  // Several workspaces: who's picking (the pick cookie's token → the email Scout vouched for). Single use, 10 min.
+  const SCOUT_PICK_COOKIE = "cp_scout_pick";
+  const SCOUT_PICK_PATH = "/api/auth/control-scout";
+  const SCOUT_PICK_TTL_MS = 10 * 60 * 1000;
+  const pendingScoutPicks = new Map<string, { email: string; name: string; popup: boolean; expiry: number }>();
+  const scoutPickCookie = (req: any, token: string | null) =>
+    `${SCOUT_PICK_COOKIE}=${token ?? ''}; Path=${SCOUT_PICK_PATH}; HttpOnly; SameSite=Lax; Max-Age=${token ? SCOUT_PICK_TTL_MS / 1000 : 0}${requestIsHttps(req) ? '; Secure' : ''}`;
+  /** The pick this browser is in the middle of, if it's still live. */
+  function scoutPickFor(req: any) {
+    const token = readCookie(req, SCOUT_PICK_COOKIE);
+    const pick = token ? pendingScoutPicks.get(token) : undefined;
+    if (!token || !pick) return null;
+    if (pick.expiry < Date.now()) { pendingScoutPicks.delete(token); return null; }
+    return { token, ...pick };
+  }
+
+  /**
+   * Scout proved this email (as an OAuth provider would): fill in a missing
+   * name from Scout's profile, drop passwords nobody proved (V5 H1), mark the
+   * email verified, and start a session on that membership.
+   */
+  async function scoutSignInAs(email: string, name: string, memberId: number): Promise<string> {
+    await fillOAuthProfile(email, name, null);
+    await dropUnprovenPasswords(email, { dbRun, dbGet });
+    await markEmailVerified(email);
+    return createSession(memberId);
+  }
+
+  async function finishScoutSignin(s: ScoutSignin, req: any, res: any, popup?: boolean) {
+    const name = (s.displayName || '').trim();
+    const rows = await activeMemberRows(s.email);
+    const teams = new Set(rows.map((r) => Number(r.team_id)));
+    if (!rows.length) {
+      // No workspace yet: the normal team step (create one, join with a code, or ask to join).
+      const token = randomHex(32);
+      pendingOAuthSignups.set(token, { provider: SCOUT_PROVIDER, providerSub: '', email: s.email, name, avatarUrl: null, intent: 'signup', expiry: Date.now() + 10 * 60 * 1000 });
+      const q = new URLSearchParams({ oauth_signup: token, intent: 'signup', provider: SCOUT_PROVIDER });
+      if (s.myTeam) q.set('team', String(s.myTeam));
+      return res.redirect(`/?${q}`);
+    }
+    if (teams.size === 1) {
+      const member = await pickMemberRow(rows);
+      const sessionId = await scoutSignInAs(s.email, name, member.id);
+      res.append("Set-Cookie", sessionCookie(sessionId, requestIsHttps(req)));
+      return res.redirect(`/?oauth=ok${popup ? '&popup=1' : ''}`);
+    }
+    // Several: they choose. The token lives only in an HttpOnly cookie scoped to the pick routes.
+    const now = Date.now();
+    for (const [k, v] of pendingScoutPicks) if (v.expiry < now) pendingScoutPicks.delete(k);
+    const token = randomHex(32);
+    pendingScoutPicks.set(token, { email: s.email, name, popup: !!popup, expiry: now + SCOUT_PICK_TTL_MS });
+    res.append("Set-Cookie", scoutPickCookie(req, token));
+    res.redirect("/?scout_pick=1");
+  }
+
+  // The picker's list: each workspace the vouched-for email is active in, with its role and the one used last.
+  app.get("/api/auth/control-scout/workspaces", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const pick = scoutPickFor(req);
+    if (!pick) return res.status(410).json({ error: "This sign-in expired — continue with Control Scout again." });
+    // The same rows the choice route accepts, so every workspace listed can be picked.
+    const rows = await activeMemberRows(pick.email);
+    // "Last used" only from a real record of use (pickMemberRow's fallback, the newest row, isn't one).
+    const ids = rows.map((r) => r.id);
+    const used = ids.length ? (await dbGet(`SELECT member_id FROM member_last_used WHERE member_id IN (${ids.map(() => "?").join(",")}) ORDER BY used_at DESC LIMIT 1`, ...ids).catch(() => null)) as any : null;
+    const last = used ? rows.find((r) => r.id === used.member_id) : null;
+    const byTeam = new Map<number, { id: string; name: string; role: "admin" | "member"; teamNumber: number | null; lastUsed: boolean }>();
+    for (const r of [...rows].sort((a, b) => Number(a.team_id) - Number(b.team_id))) {
+      const teamId = Number(r.team_id);
+      // Admin by the workspace rule (a "*" or manage_members role, or the legacy admin flag), as everywhere else.
+      const perms = await getMemberPerms(r.id, teamId);
+      const admin = perms.has("*") || perms.has("manage_members");
+      const seen = byTeam.get(teamId);
+      if (seen) { if (admin) seen.role = "admin"; continue; }
+      const team = (await dbGet("SELECT name, ftc_team_number FROM teams WHERE id = ?", teamId)) as any;
+      if (!team) continue;
+      const n = Number(team.ftc_team_number);
+      byTeam.set(teamId, {
+        id: String(teamId), name: String(team.name ?? ""), role: admin ? "admin" : "member",
+        teamNumber: Number.isInteger(n) && n > 0 ? n : null,
+        lastUsed: !!last && Number(last.team_id) === teamId,
+      });
+    }
+    res.json({ email: pick.email, name: pick.name || null, workspaces: [...byTeam.values()] });
+  });
+
+  // The picker's choice: sign in to that workspace.
+  app.post("/api/auth/control-scout/choose", async (req, res) => {
+    const pick = scoutPickFor(req);
+    if (!pick) return res.status(410).json({ error: "This sign-in expired — continue with Control Scout again." });
+    // Single use: claim the pick before any await, so a concurrent replay of the cookie finds it gone.
+    const { token, ...entry } = pick;
+    pendingScoutPicks.delete(token);
+    const teamId = Number(req.body?.workspaceId);
+    const rows = Number.isInteger(teamId) && teamId > 0 ? (await activeMemberRows(pick.email)).filter((r) => Number(r.team_id) === teamId) : [];
+    if (!rows.length) {
+      // Not theirs: nothing was signed in, so the pick stays usable for a valid choice.
+      pendingScoutPicks.set(token, entry);
+      return res.status(400).json({ error: "You're not a member of that workspace." });
+    }
+    res.append("Set-Cookie", scoutPickCookie(req, null));
+    const member = await pickMemberRow(rows);
+    const sessionId = await scoutSignInAs(pick.email, pick.name, member.id);
+    // The /api middleware moves sessionId into the HttpOnly session cookie.
+    res.json({ ok: true, sessionId, popup: pick.popup });
   });
 
   // --- Google Calendar linking (per-member, from Settings) ---

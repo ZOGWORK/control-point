@@ -187,23 +187,31 @@ export function useSignupForm({ mode, onSignup, onDone, inviteToken }: {
 
 export type OAuthProvider = 'google' | 'discord' | 'github';
 export const PROVIDER_LABEL: Record<OAuthProvider, string> = { google: 'Google', discord: 'Discord', github: 'GitHub' };
+/** Who verified a new account before its team step: an OAuth provider, or Control Scout ("Continue with Control Scout"). */
+export type SignupProvider = OAuthProvider | 'control-scout';
+export const SIGNUP_PROVIDER_LABEL: Record<SignupProvider, string> = { ...PROVIDER_LABEL, 'control-scout': 'Control Scout' };
 
 /** After OAuth: the identity is verified; collect the role-specific details. */
-export function useOAuthSignup({ token, intent, provider, onDone, inviteToken }: {
+export function useOAuthSignup({ token, intent, provider, onDone, inviteToken, initialTeamNumber }: {
   token: string;
   intent: 'admin_signup' | 'student_signup' | 'signup';
-  provider: OAuthProvider;
+  provider: SignupProvider;
   onDone: (data: any) => void;
   /** Joining through an invite link: no role choice, no access code. */
   inviteToken?: string | null;
+  /**
+   * The FTC team the person follows in Control Scout. Filled in, with "Team admin" picked, so the
+   * number lookup says at once whether that team already has a workspace (and offers to ask to join it).
+   */
+  initialTeamNumber?: string | null;
 }) {
   const viaInvite = !!inviteToken && intent !== 'admin_signup';
   const needsRole = intent === 'signup' && !viaInvite;
   const k = (f: string) => `auth:oauth-signup:${f}`;
-  const [pickedRole, setPickedRole] = useDraft<'admin' | 'student'>(k('role'), 'student');
+  const [pickedRole, setPickedRole] = useDraft<'admin' | 'student'>(k('role'), initialTeamNumber ? 'admin' : 'student');
   const isAdmin = !viaInvite && (intent === 'admin_signup' || (needsRole && pickedRole === 'admin'));
   const [teamName, setTeamName] = useDraft(k('team-name'), '');
-  const [teamNumber, setTeamNumber] = useDraft(k('team-number'), '');
+  const [teamNumber, setTeamNumber] = useDraft(k('team-number'), initialTeamNumber || '');
   const [accessCode, setAccessCode] = useDraft(k('access-code'), '');
   const [adult, setAdult] = useState(false);
   const [error, setError] = useState<string | null>(null);
