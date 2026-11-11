@@ -195,7 +195,8 @@ describe("several workspaces → a picker", () => {
       { id: String(a), name: "Alpha Bots", role: "admin", teamNumber: null },
       { id: String(b), name: "Beta Builders", role: "member", teamNumber: 4215 },
     ]);
-    expect(list.body.workspaces.filter((w: any) => w.lastUsed)).toHaveLength(1);
+    // Neither has been used yet: nothing is marked "last used" (not even the newest).
+    expect(list.body.workspaces.filter((w: any) => w.lastUsed)).toHaveLength(0);
 
     const post = (workspaceId: unknown) => raw(on, "/api/auth/control-scout/choose", {
       method: "POST", headers: { cookie: jar.header(), "content-type": "application/json", "x-cp-client": "1" }, body: JSON.stringify({ workspaceId }),
@@ -216,6 +217,10 @@ describe("several workspaces → a picker", () => {
     });
     expect(replay.status).toBe(410);
     expect((await raw(on, "/api/auth/control-scout/workspaces", { headers: { cookie: `cp_scout_pick=${token}` } })).status).toBe(410);
+    // Next time, the one they used is marked.
+    const next = await finish(email);
+    const again = await raw(on, "/api/auth/control-scout/workspaces", { headers: { cookie: next.jar.header() } });
+    expect(again.body.workspaces.filter((w: any) => w.lastUsed).map((w: any) => w.id)).toEqual([String(b)]);
   });
 
   it("no pick or an unknown one is 410, and choosing needs the client header (CSRF)", async () => {

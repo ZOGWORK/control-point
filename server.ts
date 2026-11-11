@@ -4220,7 +4220,10 @@ async function startServer() {
     if (!pick) return res.status(410).json({ error: "This sign-in expired — continue with Control Scout again." });
     const account = await sharedAccounts.loadAccount(pick.accountId);
     const rows = await activeMemberRows(pick.email);
-    const last = await pickMemberRow(rows);
+    // "Last used" only from a real record of use (pickMemberRow's fallback, the newest row, isn't one).
+    const ids = rows.map((r) => r.id);
+    const used = ids.length ? (await dbGet(`SELECT member_id FROM member_last_used WHERE member_id IN (${ids.map(() => "?").join(",")}) ORDER BY used_at DESC LIMIT 1`, ...ids).catch(() => null)) as any : null;
+    const last = used ? rows.find((r) => r.id === used.member_id) : null;
     // loadAccount's workspaces and controlPoint.teams come from one query, in the same order.
     const workspaces = (account?.workspaces || []).map((w, i) => ({
       id: w.id, name: w.name, role: w.role,
