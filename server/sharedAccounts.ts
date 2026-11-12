@@ -98,6 +98,22 @@
  *     Same aiChat path as the power rankings (offline, system actor), logged
  *     in ai_usage as endpoint "search-answer".
  *
+ * Bruno chatting in Discord through Scout's bot (a mention, or a reply to one of its answers):
+ *
+ *   POST /internal/bruno/discord-chat
+ *     body: { message: string (1..500 once whitespace is folded),
+ *             facts: string[] (0..40 lines, each 1..400, 8,000 in all): what Scout's search found,
+ *             history?: [{ role: "user" | "bruno", text (1..600) }] (0..6, oldest first): the reply chain before it }
+ *     200 { text: string, search: boolean }   Bruno's chat reply (1..4 sentences, plain text,
+ *       <= 700 characters), written from the facts and history only where it names records;
+ *       search is true when the facts answer the message (Scout then shows its records card).
+ *       Scout drops any reply naming a number that isn't in the facts, message or history.
+ *     400 { error: "invalid_packet", field }   no message, bad facts or history
+ *     429 { error: "rate_limited" }            over 600 calls in the last hour (Retry-After set)
+ *     502 { error: "ai_failed" | "malformed_output" }
+ *     503 { error: "ai_unavailable" }
+ *     Same aiChat path (offline, system actor), logged in ai_usage as endpoint "discord-chat".
+ *
  * Continue with Control Scout (Control Point's sign-in and Get Started; the reverse of the hand-off):
  *
  *   GET /api/auth/control-scout?intent=… (server.ts) binds a state to this browser (the usual
@@ -130,6 +146,7 @@ import express from "express";
 import { RateLimiter, clientIp, limit, normEmail } from "./rateLimit.js";
 import { POWER_RANKINGS_SYSTEM, buildPowerRankingsPrompt, parsePowerRankingsOutput, validatePacket } from "./brunoPowerRankings.js";
 import { SEARCH_ANSWER_SYSTEM, buildSearchAnswerPrompt, parseSearchAnswerOutput, validateAnswerPacket } from "./brunoSearchAnswer.js";
+import { DISCORD_CHAT_SYSTEM, buildChatPrompt, parseChatOutput, validateChatPacket } from "./brunoDiscordChat.js";
 
 export interface SharedAccountDeps {
   dbGet: (sql: string, ...args: any[]) => Promise<any>;
@@ -213,6 +230,10 @@ export const POWER_RANKINGS_RATE = { max: 10, windowMs: 60 * 60 * 1000 };
 export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
 /** Room for the sentence and all six points (seasons, records, decimal OPRs run to many tokens): a cut-off reply is malformed JSON. */
 export const SEARCH_ANSWER_MAX_TOKENS = 900;
+/** Calls per hour to /internal/bruno/discord-chat: one per mention or reply to the bot (Scout caches repeats briefly). */
+export const DISCORD_CHAT_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
+/** A chat reply is 1 to 3 sentences of JSON: room to spare so it's never cut off mid-string. */
+export const DISCORD_CHAT_MAX_TOKENS = 400;
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
@@ -691,6 +712,33 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       } catch {
         console.warn(`[shared-accounts] search-answer: malformed AI output (${raw.length} chars)`);
         if (res.headersSent) { line({ error: "malformed_output" }); res.end(); } else res.status(502).json({ error: "malformed_output" });
+      }
+    });
+
+    // Scout's Discord bot: Bruno chats back to a mention or a reply (server/brunoDiscordChat.ts).
+    const chatLimiter = new RateLimiter(now);
+    router.post("/bruno/discord-chat", async (req, res) => {
+      const packet = validateChatPacket(req.body);
+      if (!packet.ok) return res.status(400).json({ error: "invalid_packet", field: packet.error });
+      if (!deps.brunoWrite) return res.status(503).json({ error: "ai_unavailable" });
+      const wait = chatLimiter.hit("bruno-discord-chat", DISCORD_CHAT_RATE);
+      if (wait > 0) {
+        res.setHeader("Retry-After", String(wait));
+        return res.status(429).json({ error: "rate_limited" });
+      }
+      let raw: string;
+      try {
+        raw = await deps.brunoWrite({ endpoint: "discord-chat", system: DISCORD_CHAT_SYSTEM, user: buildChatPrompt(packet.value!), maxTokens: DISCORD_CHAT_MAX_TOKENS });
+      } catch (err: any) {
+        console.warn("[shared-accounts] discord-chat: AI call failed:", String(err?.message || err).slice(0, 200));
+        if (/not configured/i.test(String(err?.message || ""))) return res.status(503).json({ error: "ai_unavailable" });
+        return res.status(502).json({ error: "ai_failed" });
+      }
+      try {
+        res.json(parseChatOutput(raw));
+      } catch {
+        console.warn(`[shared-accounts] discord-chat: malformed AI output (${raw.length} chars)`);
+        res.status(502).json({ error: "malformed_output" });
       }
     });
 
