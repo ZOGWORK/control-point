@@ -11,10 +11,6 @@
 </p>
 
 <p align="center">
-  <a href="https://tryctrlpoint.org"><b>🚀 Live Demo</b></a>
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white" alt="React 19" />
   <img src="https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript&logoColor=white" alt="TypeScript 5.8" />
   <img src="https://img.shields.io/badge/Vite-6-646cff?logo=vite&logoColor=white" alt="Vite 6" />
