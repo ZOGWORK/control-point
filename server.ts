@@ -2368,6 +2368,13 @@ async function startServer() {
     countAdmins,
     // Declared further down with the member routes; only called per request, after startup.
     removeMembership: (teamId, memberId) => removeMembership(teamId, memberId),
+    // The account's one profile picture (GET/PUT /internal/accounts/:id/avatar). The stored_files
+    // helpers are declared further down; only called per request, after startup.
+    avatarFiles: {
+      store: (f) => storeFile({ teamId: null, memberId: f.memberId, kind: "avatar", filename: f.filename, mimeType: f.mimeType, buffer: f.buffer }),
+      read: (id, r2Key, blobLen) => readStoredBytes("stored_files", id, r2Key, blobLen),
+      dropBytes: (id) => deleteR2Object(fileKey("stored_files", id)),
+    },
     // System writing jobs (Scout's power-rankings blurbs): Bruno through aiChat, so the Gemini to
     // Anthropic failover and timeouts apply, with web search off. Usage is logged under the system
     // actor (member_id 0, no team), never a member. logAiUsage is declared further down.
@@ -7374,6 +7381,17 @@ async function startServer() {
   // Self-service profile: any signed-in member can update their own
   // name, role description, theme colors, and avatar. Admin-only fields
   // (email, is_board, scopes, account_type) stay on the admin endpoint.
+  /** A member's picture change, account-wide: every active row with their
+   *  email and the shared account (sharedAccounts.setAccountAvatar). A row
+   *  with no email is the whole account, so only it changes. */
+  async function setMemberAvatar(memberId: number, url: string | null): Promise<void> {
+    const me = (await dbGet("SELECT email, avatar_url FROM members WHERE id = ?", memberId)) as any;
+    if (me?.email && String(me.email).trim()) return sharedAccounts.setAccountAvatar(String(me.email), url);
+    await dbRun("UPDATE members SET avatar_url = ? WHERE id = ?", url, memberId);
+    const prev = /^\/api\/files\/(\d+)$/.exec(String(me?.avatar_url || ""));
+    if (prev && me.avatar_url !== url) await sharedAccounts.dropUnreferencedAvatars([Number(prev[1])]);
+  }
+
   app.patch("/api/profile", async (req, res) => {
     const auth = await requireAuth(req, res);
     if (!auth) return;
@@ -7402,25 +7420,36 @@ async function startServer() {
     if (accent_color !== undefined) updates.accent_color = cleanHex(accent_color);
     if (primary_color !== undefined) updates.primary_color = cleanHex(primary_color);
     if (text_color !== undefined) updates.text_color = cleanHex(text_color);
+    // The picture is account-wide (setMemberAvatar), so it's written apart from the row's own fields.
+    let newAvatar: { url: string | null } | null = null;
     if (avatar_url !== undefined) {
       // Only clearing, an https image URL, or one of this account's own
       // uploaded avatars — a pointer at someone else's stored file was the
-      // first step of deleting it via the avatar upload route.
+      // first step of deleting it via the avatar upload route. The picture
+      // the account already shows counts as its own too (one Control Scout
+      // uploaded has no owning member row).
       const v = typeof avatar_url === "string" ? avatar_url.trim() : "";
-      if (!v) updates.avatar_url = null;
-      else if (/^https:\/\/[^\s"'<>]+$/i.test(v) && v.length <= 1000) updates.avatar_url = v;
+      if (!v) newAvatar = { url: null };
+      else if (/^https:\/\/[^\s"'<>]+$/i.test(v) && v.length <= 1000) newAvatar = { url: v };
       else {
         const fm = /^\/api\/files\/(\d+)$/.exec(v);
         const own = fm ? (await dbGet(
           "SELECT f.id FROM stored_files f JOIN members m ON m.id = f.member_id WHERE f.id = ? AND f.kind = 'avatar' AND LOWER(m.email) = (SELECT LOWER(email) FROM members WHERE id = ?)",
           Number(fm[1]), auth.memberId
         )) as any : null;
-        if (!own) return res.status(400).json({ error: "Invalid avatar" });
-        updates.avatar_url = v;
+        const current = fm && !own ? (await dbGet(
+          `SELECT 1 AS ok FROM stored_files f WHERE f.id = ? AND f.kind = 'avatar' AND (
+             EXISTS (SELECT 1 FROM members m WHERE m.avatar_url = ? AND m.email IS NOT NULL AND LOWER(TRIM(m.email)) = (SELECT LOWER(TRIM(email)) FROM members WHERE id = ?))
+             OR EXISTS (SELECT 1 FROM accounts a WHERE a.avatar_url = ? AND a.email = (SELECT LOWER(TRIM(email)) FROM members WHERE id = ?)))`,
+          Number(fm[1]), v, auth.memberId, v, auth.memberId
+        )) as any : null;
+        if (!own && !current) return res.status(400).json({ error: "Invalid avatar" });
+        newAvatar = { url: v };
       }
     }
     const cols = Object.keys(updates);
     (await dbRun(`UPDATE members SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...Object.values(updates), auth.memberId));
+    if (newAvatar) await setMemberAvatar(auth.memberId, newAvatar.url);
     if (interface_mode !== undefined) {
       // Per account, not per workspace: every membership row for this email.
       const me = (await dbGet("SELECT email FROM members WHERE id = ?", auth.memberId)) as any;
@@ -7529,12 +7558,9 @@ async function startServer() {
       filename: req.file.originalname, mimeType: req.file.mimetype, buffer: req.file.buffer,
     });
     const avatarUrl = fileUrl(fileId);
-    // Remove the previous avatar's stored file so uploads don't pile up
-    try {
-      const prev = (await dbGet("SELECT avatar_url FROM members WHERE id = ?", auth.memberId)) as any;
-      await deleteOwnedAvatarFile(prev?.avatar_url, [auth.memberId]);
-    } catch { /* best effort */ }
-    (await dbRun("UPDATE members SET avatar_url = ? WHERE id = ?", avatarUrl, auth.memberId));
+    // Account-wide: every workspace and the shared account show it; the
+    // previous file goes once nothing points at it.
+    await setMemberAvatar(auth.memberId, avatarUrl);
     const user = (await dbGet("SELECT * FROM members WHERE id = ?", auth.memberId));
     res.json({ avatar_url: avatarUrl, user: sanitizeMember(user) });
   });
@@ -8878,6 +8904,8 @@ async function startServer() {
       const ph = memberIds.map(() => "?").join(",");
       const others = (await dbGet(`SELECT COUNT(*) AS n FROM members WHERE avatar_url = ? AND id NOT IN (${ph})`, url, ...memberIds)) as any;
       if ((others?.n || 0) > 0) return;
+      // The shared account (Control Scout) may still show it.
+      if (await dbGet("SELECT 1 AS ok FROM accounts WHERE avatar_url = ?", url)) return;
       await deleteStoredRow(id);
     } catch { /* best effort */ }
   }

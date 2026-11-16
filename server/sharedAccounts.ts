@@ -21,6 +21,42 @@
  * permissions include "*" or "manage_members" (Control Point's own admin
  * rule, as in countAdmins); otherwise "member". `controlPoint` is unchanged.
  *
+ * Every `account` also carries `avatar: { id: string } | null`, the one
+ * profile picture both apps show (migration 158 adds accounts.avatar_url):
+ * accounts.avatar_url when it is a local `/api/files/N` whose stored file
+ * exists (kind 'avatar', an image/png|jpeg|webp|gif mime) → id = "N";
+ * otherwise the newest (highest N) such file among the email's ACTIVE
+ * `members` rows; otherwise null. External http(s) URLs are ignored
+ * (Control Point's own job downloads them). `id` changes whenever the
+ * picture does, so Scout can cache by it.
+ *
+ * Profile picture (one per account; either app can set or remove it):
+ *
+ *   GET /internal/accounts/:id/avatar
+ *     200 the image bytes, Content-Type the stored mime, X-Avatar-Id: <id>
+ *     404 { error: "no_avatar" }   the account has no picture (or its bytes are gone)
+ *     404 { error: "Not found" }   no such account
+ *
+ *   PUT /internal/accounts/:id/avatar
+ *     raw body, Content-Type image/png | image/jpeg | image/webp, at most 512 KB
+ *     (its own raw parser; the router's 16 kB JSON cap doesn't apply). The
+ *     magic bytes must match the content type.
+ *     200 { avatar: { id } }   stored as kind 'avatar' (no team; member = the
+ *       account's first active members row, or none), then set account-wide.
+ *     400 { error: "invalid_image" }   413 { error: "too_large" }
+ *     404 { error: "Not found" }       no such account
+ *
+ *   DELETE /internal/accounts/:id/avatar
+ *     200 { ok: true }   picture removed account-wide (also when there was none)
+ *     404 { error: "Not found" }   no such account
+ *
+ *   Account-wide (setAccountAvatar, also used by Control Point's own
+ *   POST /api/profile/avatar and PATCH /api/profile): writes
+ *   accounts.avatar_url (when the email has an accounts row) and avatar_url on
+ *   every active `members` row with that email, then deletes the previous
+ *   stored file(s) only when they are kind 'avatar' and no members or
+ *   accounts row still points at them.
+ *
  * Workspace members (Control Scout's Settings → Workspace → Members):
  *
  *   GET /internal/workspaces/:workspaceId/members
@@ -165,6 +201,19 @@ export interface SharedAccountDeps {
    * Scout asks for it streamed); `signal`: stop the model call (Scout went away).
    */
   brunoWrite?: (job: { endpoint: string; system: string; user: string; maxTokens: number; onChunk?: (text: string) => void; signal?: AbortSignal }) => Promise<string>;
+  /**
+   * Control Point's stored_files helpers for profile pictures (server.ts wires them lazily: they're
+   * declared after this module is built and only called per request). Unset → GET/PUT avatar
+   * answer as if there were no picture / 503.
+   */
+  avatarFiles?: {
+    /** Store an avatar (kind 'avatar', no team) and return its stored_files id. */
+    store: (file: { memberId: number | null; mimeType: string; filename: string; buffer: Buffer }) => Promise<number>;
+    /** The bytes of a stored file (R2 first, the database copy as fallback), or null when gone. */
+    read: (id: number, r2Key: string | null, blobLen: number) => Promise<Buffer | null>;
+    /** After its stored_files row was deleted: drop the file's R2 copy (best effort). */
+    dropBytes: (id: number) => Promise<void>;
+  };
   env?: Record<string, string | undefined>;
   now?: () => number;
 }
@@ -187,7 +236,31 @@ export interface SharedAccount {
    * admin by Control Point's own rule (see workspaceAdmin), else "member".
    */
   workspaces: SharedWorkspace[];
+  /** The account's one profile picture (see the contract above), or null. `id` changes with the picture. */
+  avatar: { id: string } | null;
 }
+
+/** Mimes a profile picture may be served as; any other stored type counts as no picture. */
+export const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+/** Types Scout may upload (PUT /internal/accounts/:id/avatar). */
+const AVATAR_UPLOAD_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
+export const MAX_AVATAR_BYTES = 512 * 1024;
+
+/** The stored_files id behind a local `/api/files/N` URL, else null (external URLs, junk). */
+export function localFileId(url: unknown): number | null {
+  const m = /^\/api\/files\/([1-9]\d{0,14})$/.exec(typeof url === "string" ? url.trim() : "");
+  return m ? Number(m[1]) : null;
+}
+
+/** Whether `buf` starts with the magic bytes of `mime` (png, jpeg, webp). */
+export function imageMagicMatches(mime: string, buf: Buffer): boolean {
+  if (mime === "image/png") return buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mime === "image/jpeg") return buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  if (mime === "image/webp") return buf.length >= 12 && buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP";
+  return false;
+}
+
+const cleanMime = (v: unknown) => String(v || "").toLowerCase().split(";")[0].trim();
 
 export interface SharedWorkspace {
   id: string;
@@ -349,9 +422,84 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
     return Number(row.id);
   }
 
+  /** A stored avatar file that can be served (exists, kind 'avatar', an allowed image mime), else null. */
+  async function servableAvatar(fileId: number): Promise<{ id: number; mime: string; r2Key: string | null; blobLen: number } | null> {
+    const f = await deps.dbGet(
+      "SELECT id, mime_type, r2_key, length(data) AS blob_len FROM stored_files WHERE id = ? AND kind = 'avatar' AND data IS NOT NULL",
+      fileId,
+    );
+    const mime = cleanMime(f?.mime_type);
+    if (!f || !AVATAR_MIMES.has(mime)) return null;
+    return { id: Number(f.id), mime, r2Key: f.r2_key == null ? null : String(f.r2_key), blobLen: Number(f.blob_len) || 0 };
+  }
+
+  /**
+   * The account's picture: accounts.avatar_url when it is a servable local file, else the newest
+   * servable local avatar among the email's active members rows, else null.
+   */
+  async function avatarOf(email: string, accountAvatarUrl: unknown) {
+    const own = localFileId(accountAvatarUrl);
+    if (own) {
+      const f = await servableAvatar(own);
+      if (f) return f;
+    }
+    const rows = await deps.dbAll(
+      "SELECT avatar_url FROM members WHERE LOWER(TRIM(email)) = ? AND COALESCE(is_active, 1) = 1 AND avatar_url LIKE '/api/files/%'",
+      email,
+    );
+    const ids = [...new Set(rows.map((r: any) => localFileId(r.avatar_url)).filter((x): x is number => x != null))].sort((a, b) => b - a);
+    for (const fid of ids) {
+      const f = await servableAvatar(fid);
+      if (f) return f;
+    }
+    return null;
+  }
+
+  /** Delete these avatar files where nothing (any members row, any accounts row) points at them any more. */
+  async function dropUnreferencedAvatars(fileIds: number[]): Promise<void> {
+    for (const fid of new Set(fileIds)) {
+      try {
+        const url = `/api/files/${fid}`;
+        // One statement: the reference check and the delete can't be split by a row that starts using it.
+        const r = await deps.dbRun(
+          `DELETE FROM stored_files WHERE id = ? AND kind = 'avatar'
+             AND NOT EXISTS (SELECT 1 FROM members WHERE avatar_url = ?)
+             AND NOT EXISTS (SELECT 1 FROM accounts WHERE avatar_url = ?)`,
+          fid, url, url,
+        );
+        if (r.changes && deps.avatarFiles) await deps.avatarFiles.dropBytes(fid);
+      } catch (e) {
+        console.warn(`[shared-accounts] dropping avatar file ${fid} failed:`, String((e as any)?.message || e).slice(0, 200));
+      }
+    }
+  }
+
+  /**
+   * Set (or, with null, remove) one person's picture everywhere: the shared accounts row for the
+   * email (when there is one) and every active members row with it. The previous files are
+   * deleted once nothing points at them.
+   */
+  async function setAccountAvatar(rawEmail: string, url: string | null): Promise<void> {
+    const email = normEmail(rawEmail);
+    if (!email) return;
+    const prevMembers = await deps.dbAll(
+      "SELECT avatar_url FROM members WHERE LOWER(TRIM(email)) = ? AND COALESCE(is_active, 1) = 1", email,
+    );
+    const prevAccount = await deps.dbGet("SELECT avatar_url FROM accounts WHERE email = ?", email);
+    await deps.dbRun("UPDATE accounts SET avatar_url = ? WHERE email = ?", url, email);
+    await deps.dbRun(
+      "UPDATE members SET avatar_url = ? WHERE LOWER(TRIM(email)) = ? AND COALESCE(is_active, 1) = 1", url, email,
+    );
+    const next = localFileId(url);
+    const prev = [...prevMembers.map((r: any) => r.avatar_url), prevAccount?.avatar_url]
+      .map(localFileId).filter((x): x is number => x != null && x !== next);
+    await dropUnreferencedAvatars(prev);
+  }
+
   async function loadAccount(id: number): Promise<SharedAccount | null> {
-    const row = await deps.dbGet("SELECT id, email, display_name, created_at FROM accounts WHERE id = ?", id);
+    const row = await deps.dbGet("SELECT id, email, display_name, created_at, avatar_url FROM accounts WHERE id = ?", id);
     if (!row) return null;
+    const avatar = await avatarOf(String(row.email), row.avatar_url);
     // Read-only view of Control Point membership: active rows with this email.
     const teams = await deps.dbAll(
       `SELECT t.id AS id, t.name AS name, t.ftc_team_number AS ftc
@@ -411,6 +559,7 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
         name: String(t.name ?? ""),
         role: adminTeams.has(Number(t.id)) ? "admin" as const : "member" as const,
       })),
+      avatar: avatar ? { id: String(avatar.id) } : null,
     };
   }
 
@@ -527,6 +676,64 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       const account = /^[1-9]\d{0,14}$/.test(raw) ? await loadAccount(Number(raw)) : null;
       if (!account) return res.status(404).json({ error: "Not found" });
       res.json({ account });
+    });
+
+    // The account's one profile picture (see the contract above).
+    const accountRow = async (raw: unknown) => {
+      const id = cleanId(raw);
+      return id ? await deps.dbGet("SELECT id, email, avatar_url FROM accounts WHERE id = ?", id) : null;
+    };
+
+    router.get("/accounts/:id/avatar", async (req, res) => {
+      const acc = await accountRow(req.params.id);
+      if (!acc) return res.status(404).json({ error: "Not found" });
+      const f = await avatarOf(String(acc.email), acc.avatar_url);
+      const bytes = f && deps.avatarFiles ? await deps.avatarFiles.read(f.id, f.r2Key, f.blobLen) : null;
+      if (!f || !bytes) return res.status(404).json({ error: "no_avatar" });
+      res.setHeader("Content-Type", f.mime);
+      res.setHeader("X-Avatar-Id", String(f.id));
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Length", String(bytes.length));
+      res.end(bytes);
+    });
+
+    // Its own raw parser (any type, so a wrong type gets invalid_image rather than an empty body).
+    const rawAvatar = express.raw({ type: () => true, limit: MAX_AVATAR_BYTES });
+    router.put("/accounts/:id/avatar", (req, res, next) => {
+      rawAvatar(req, res, (err?: any) => {
+        if (!err) return next();
+        if (err.type === "entity.too.large" || Number(err.status) === 413) return res.status(413).json({ error: "too_large" });
+        return res.status(400).json({ error: "invalid_image" });
+      });
+    }, async (req, res) => {
+      const acc = await accountRow(req.params.id);
+      if (!acc) return res.status(404).json({ error: "Not found" });
+      const mime = cleanMime(req.headers["content-type"]);
+      const buf = Buffer.isBuffer(req.body) ? req.body : null;
+      if (!buf || !buf.length || !AVATAR_UPLOAD_MIMES.has(mime) || !imageMagicMatches(mime, buf)) {
+        return res.status(400).json({ error: "invalid_image" });
+      }
+      if (buf.length > MAX_AVATAR_BYTES) return res.status(413).json({ error: "too_large" });
+      if (!deps.avatarFiles) return res.status(503).json({ error: "unavailable" });
+      const email = String(acc.email);
+      const first = await deps.dbGet(
+        "SELECT id FROM members WHERE LOWER(TRIM(email)) = ? AND COALESCE(is_active, 1) = 1 ORDER BY id LIMIT 1", email,
+      );
+      const fileId = await deps.avatarFiles.store({
+        memberId: first ? Number(first.id) : null,
+        mimeType: mime,
+        filename: `scout-avatar.${mime === "image/jpeg" ? "jpg" : mime.slice(6)}`,
+        buffer: buf,
+      });
+      await setAccountAvatar(email, `/api/files/${fileId}`);
+      res.json({ avatar: { id: String(fileId) } });
+    });
+
+    router.delete("/accounts/:id/avatar", async (req, res) => {
+      const acc = await accountRow(req.params.id);
+      if (!acc) return res.status(404).json({ error: "Not found" });
+      await setAccountAvatar(String(acc.email), null);
+      res.json({ ok: true });
     });
 
     router.post("/handoff/redeem", async (req, res) => {
@@ -848,5 +1055,5 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
     return `${origin}/api/auth/control-point/vouch?${new URLSearchParams({ state })}`;
   }
 
-  return { internalRouter, registerStartRoute, completeOAuthHandoff, upsertAccount, loadAccount, redeemSigninCode, scoutSigninEnabled, scoutVouchUrl };
+  return { internalRouter, registerStartRoute, completeOAuthHandoff, upsertAccount, loadAccount, redeemSigninCode, scoutSigninEnabled, scoutVouchUrl, setAccountAvatar, dropUnreferencedAvatars };
 }
