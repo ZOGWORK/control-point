@@ -7,7 +7,7 @@ import http from "http";
 import express from "express";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createSharedAccounts, DISCORD_CHAT_MAX_TOKENS, DISCORD_CHAT_RATE } from "../sharedAccounts";
-import { DISCORD_CHAT_SYSTEM, MAX_HISTORY, MAX_MESSAGE, MAX_REPLY, buildChatPrompt, parseChatOutput, validateChatPacket } from "../brunoDiscordChat";
+import { DISCORD_CHAT_SYSTEM, MAX_HISTORY, SCOUT_REDESIGN_PUBLIC, MAX_MESSAGE, MAX_REPLY, buildChatPrompt, parseChatOutput, validateChatPacket } from "../brunoDiscordChat";
 
 const KEY = "test-internal-key-0123456789-abcdefghijklmnop";
 const FACTS = ["Result: 24409 Cherry Bombs (Capuchino High School · San Bruno, CA, USA)"];
@@ -85,6 +85,26 @@ describe("prompt and output", () => {
     expect(DISCORD_CHAT_SYSTEM).toMatch(/ONLY from FACTS or HISTORY/);
     expect(DISCORD_CHAT_SYSTEM).toMatch(/greeting or small talk/i);
     expect(DISCORD_CHAT_SYSTEM).toMatch(/"search" is true only when the FACTS answer/);
+  });
+  it("knows Control Scout's redesign at a fan's level: the look, answer-first pages, rolling out with no date", () => {
+    expect(DISCORD_CHAT_SYSTEM).toContain(SCOUT_REDESIGN_PUBLIC);
+    for (const point of [/full redesign of the whole site/, /calmer, darker, cleaner/, /near-black background/, /soft colour wash/, /soft white logo/,
+      /mint-green accent in place of the old yellow/, /answer comes first/, /simpler sidebar/, /profile picture .*Settings and your account/,
+      /more compact/, /smoother/, /fast/, /dark first/i, /page by page/, /isn't live for everyone yet/, /no date: say it's coming soon, when it's ready/]) {
+      expect(SCOUT_REDESIGN_PUBLIC).toMatch(point);
+    }
+    // Asked for behind-the-scenes details, he declines kindly and gives the public summary instead.
+    expect(SCOUT_REDESIGN_PUBLIC).toMatch(/Never give a date, a version, a code name, a setting, a link or a way to turn it on early/);
+    expect(SCOUT_REDESIGN_PUBLIC).toMatch(/which pages are done/);
+    expect(SCOUT_REDESIGN_PUBLIC).toMatch(/can't share them, then give the short public summary/);
+  });
+  it("the job names nothing internal, so even a leaked prompt gives away no code name, switch, colour code, ticket or tool", () => {
+    for (const internal of [/\bv\s?\d+\b/i, /\?v\d*=/, /localStorage/i, /\bflags?\b/i, /#[0-9a-f]{3,8}\b/i, /#\d+/, /\bPRs?\b/, /\bbranch/i,
+      /\btokens?\b/i, /\.(tsx?|css|md)\b/, /figma/i, /loopy|greptile/i, /\bskills?\b/i, /\bSushil\b/i, /\b20\d\d\b/,
+      /\b(january|february|march|april|june|july|august|september|october|november|december)\b/i,
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+\d/i, /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i]) {
+      expect(SCOUT_REDESIGN_PUBLIC).not.toMatch(internal);
+    }
   });
   it("reads the reply and its search flag, strips markdown, caps the length", () => {
     expect(parseChatOutput('{"text": "Hey! I\'m **Bruno**.", "search": false}')).toEqual({ text: "Hey! I'm Bruno.", search: false });
