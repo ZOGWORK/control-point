@@ -26,6 +26,8 @@ import { TaskTimeline, useTaskTimeline } from './TaskTimeline';
 import { TaskSketches } from './TaskSketches';
 import { notify } from '../../../components/dialog';
 import { dueShortcuts, addDaysISO } from '../../../utils/dueShortcuts';
+import { splitDescription } from '../../../utils/taskImages';
+import { TaskDescriptionField } from './TaskDescriptionField';
 
 type Ctl = ReturnType<typeof useTasksController>;
 
@@ -176,6 +178,35 @@ export function CompletionHistory({ task, members }: { task: any; members: any[]
   );
 }
 
+/** A task description with its images shown inline (see utils/taskImages). */
+export function DescriptionView({ text }: { text: string }) {
+  const parts = splitDescription(text);
+  let n = 0;
+  return (
+    <div className="space-y-2 text-sm leading-relaxed text-foreground/90">
+      {parts.map((p, i) => {
+        if (p.kind === 'text') {
+          const t = p.text.replace(/^\n/, '').replace(/\n$/, '');
+          return t.trim() ? <p key={i} className="whitespace-pre-wrap">{t}</p> : null;
+        }
+        n += 1;
+        return <DescriptionImage key={i} src={p.url} alt={p.alt || `Image ${n}`} />;
+      })}
+    </div>
+  );
+}
+
+function DescriptionImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <a href={src} target="_blank" rel="noreferrer" className="block w-fit max-w-full overflow-hidden rounded-lg border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Open ${alt} full size`}>
+      {failed
+        ? <span className="flex items-center gap-2 bg-muted px-3 py-2 text-xs text-muted-foreground"><ImageOff className="size-4" aria-hidden /> Can't preview this image. Open it</span>
+        : <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} className="max-h-80 max-w-full bg-muted object-contain" />}
+    </a>
+  );
+}
+
 function useSheetSide() {
   return useIsNarrow() ? 'bottom' : 'right';
 }
@@ -317,7 +348,7 @@ export function TaskViewSheet({ task, onOpenChange, ctl, members, teams, onOpenT
               <div>
                 <Label className="mb-2 block">Description</Label>
                 {task.description
-                  ? <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{task.description}</p>
+                  ? <DescriptionView text={task.description} />
                   : <p className="text-sm text-muted-foreground">No description.</p>}
               </div>
               <Separator />
@@ -376,6 +407,8 @@ export function TaskEditorSheet({ ctl, members, teams }: { ctl: Ctl; members: an
   // A different task (or a fresh draft) starts with no AI tags.
   useEffect(() => { tagSuggest.reset(); }, [ctl.showAddTask, ctl.editingTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
   const saving = ctl.pendingIds.has(-1);
+  // Images still uploading into the description: creating waits for them.
+  const [imagesPending, setImagesPending] = useState(0);
   // Subsystems come from the task's team (Settings → Workspace → Robot subsystems).
   const team = teams.find((t) => String(t.id) === String(f.team_id)) ?? teams[0];
   const teamSubsystems = parseSubsystems(team?.subsystems);
@@ -430,7 +463,13 @@ export function TaskEditorSheet({ ctl, members, teams }: { ctl: Ctl; members: an
             </div>
             <div className="grid gap-2">
               <Label htmlFor="task-desc">Description</Label>
-              <Textarea id="task-desc" value={f.description} onChange={(e) => set({ description: e.target.value })} placeholder="Details, links, acceptance criteria…" className="min-h-28" />
+              <TaskDescriptionField
+                key={`${ctl.editingTaskId ?? 'new'}`}
+                id="task-desc"
+                value={f.description || ''}
+                onChange={(description) => ctl.setNewTask({ ...latest.current, description })}
+                onPendingChange={setImagesPending}
+              />
             </div>
             {!editing && teams.length > 1 && (
               <div className="grid gap-2">
@@ -538,9 +577,9 @@ export function TaskEditorSheet({ ctl, members, teams }: { ctl: Ctl; members: an
               </span>
             )}
             {!editing && <Button type="button" variant="outline" onClick={ctl.closeTaskModal}>Cancel</Button>}
-            <Button type="submit" disabled={saving || !f.title.trim()}>
-              {saving && <Loader2 className="animate-spin" />}
-              {editing ? 'Done' : 'Create task'}
+            <Button type="submit" disabled={saving || !f.title.trim() || imagesPending > 0}>
+              {(saving || imagesPending > 0) && <Loader2 className="animate-spin" />}
+              {imagesPending > 0 ? 'Adding images…' : editing ? 'Done' : 'Create task'}
             </Button>
           </div>
         </form>

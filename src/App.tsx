@@ -103,6 +103,7 @@ import { cn, Card, Button, Input } from './components/ui';
 import DashboardView from './components/dashboard/DashboardView';
 import { useTranslation } from 'react-i18next';
 import { applyPulseOrigins, readPulseOrigins } from './utils/gridPulse';
+import { stripDescriptionImages } from './utils/taskImages';
 
 // Only accept real 6-digit hex colors. A junk string saved as a theme color
 // (e.g. "null", " ", "#") would make var(--color-accent) invalid and silently
@@ -3124,7 +3125,7 @@ export function TasksView({ tasks, setTasks, teams, members, onRefresh, refresh,
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-text-muted line-clamp-2 mb-3">{task.description}</p>
+                  <p className="text-xs text-text-muted line-clamp-2 mb-3">{stripDescriptionImages(task.description)}</p>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       {(() => {
