@@ -240,3 +240,50 @@ describe("task completion proof", () => {
     expect(String(images[0])).toMatch(/^\/api\/files\//);
   });
 });
+
+describe("task description images", () => {
+  // Hand-built multipart (see "accepts image-only proof" for why).
+  const upload = async (session: string, bytes: Buffer, name: string, type: string) => {
+    const boundary = "----cp-test-boundary-img";
+    const body = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="${name}"\r\nContent-Type: ${type}\r\n\r\n`),
+      bytes,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    return api("/api/tasks/images", session, { method: "POST", headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` }, body });
+  };
+  const png = () => Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
+  it("stores a manager's image and serves it to the team inline", async () => {
+    const { status, body } = await upload(SESS.admin, png(), "wiring.png", "image/png");
+    expect(status).toBe(200);
+    expect(body.url).toMatch(/^\/api\/files\/\d+$/);
+    expect(body.name).toBe("wiring.png");
+    const db = (globalThis as any).__db;
+    const row: any = (await db.execute({ sql: "SELECT kind, team_id FROM stored_files WHERE id = ?", args: [Number(body.url.split("/").pop())] })).rows[0];
+    expect(row.kind).toBe("task_image");
+    // A teammate opens it as a picture, not a download.
+    const headers = new Headers();
+    withSession(headers, SESS.assignee);
+    const res = await fetch(`${base}${body.url}`, { headers });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-disposition")).toMatch(/^inline/);
+  });
+
+  it("refuses members who can't create tasks", async () => {
+    const { status } = await upload(SESS.outsider, png(), "x.png", "image/png");
+    expect(status).toBe(403);
+  });
+
+  it("refuses formats browsers can't show", async () => {
+    const { status, body } = await upload(SESS.admin, Buffer.from("<svg/>"), "x.svg", "image/svg+xml");
+    expect(status).toBe(400);
+    expect(String(body?.error)).toMatch(/format/i);
+  });
+
+  it("asks for an image when none is attached", async () => {
+    const { status } = await api("/api/tasks/images", SESS.admin, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(status).toBe(400);
+  });
+});

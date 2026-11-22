@@ -10265,6 +10265,30 @@ Rules:
     return created;
   }
 
+  // An image for a task's description (pasted, dropped or picked in the task
+  // editor). Stored like proof photos; the editor puts its /api/files/:id URL
+  // in the description as ![name](url), which the task view shows inline.
+  // Same browser-showable formats as proof, 10MB, one per request.
+  app.post("/api/tasks/images", (req: any, res: any) => {
+    proofUpload.single("image")(req, res, async (err: any) => {
+      if (err) return res.status(err?.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: err?.code === "LIMIT_FILE_SIZE" ? "Images must be 10 MB or smaller." : (err.message || "Invalid image") });
+      try {
+        const auth = await requirePerm(req, res, "manage_tasks");
+        if (!auth) return;
+        const f = req.file as any;
+        if (!f?.buffer?.length) return res.status(400).json({ error: "Attach an image." });
+        const id = await storeFile({
+          teamId: auth.teamId, memberId: auth.memberId, kind: "task_image",
+          filename: f.originalname, mimeType: f.mimetype, buffer: f.buffer,
+        });
+        res.json({ url: fileUrl(id), name: String(f.originalname || "image") });
+      } catch (error) {
+        console.error("Error saving a task image:", error);
+        res.status(500).json({ error: "Couldn't save that image." });
+      }
+    });
+  });
+
   app.post("/api/tasks", async (req, res) => {
     try {
       const auth = await requirePerm(req, res, "manage_tasks");
