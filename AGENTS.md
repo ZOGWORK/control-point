@@ -6,13 +6,13 @@ and never renumber.
 
 ## Workflow
 
-1. **Every change goes through a pull request.** Branch from `main`, push, and open the PR against `Control-Point-FTC/control-point`:
-   `gh pr create -R Control-Point-FTC/control-point --head <branch>` (without `-R` gh may pick a fork).
-2. **Greptile review to 5/5.** Trigger with a `@greptile review` comment, fix every finding, and reply on and resolve each thread. Merge only when the latest Greptile review is on the PR's **current head commit**, scores **5/5**, and **0 threads are unresolved**.
+1. **Every change goes through a pull request.** Branch from `main`, push, and open the PR against `ZOGWORK/control-point`:
+   `gh pr create -R ZOGWORK/control-point --head <branch>` (without `-R` gh may pick a fork).
+2. **Loopy review to 5/5. Loopy is the only reviewer.** Trigger with a `@loopyreviews-bot review` comment, fix every finding, reply on and resolve each thread, push, and re-trigger. Merge only when the latest Loopy comment says **Confidence 5/5**, its "last reviewed" commit is the PR's **current head commit**, **0 threads are unresolved**, and CI is green. Read the bot's comment itself, not only the `loopy/review` status. If Loopy is down, stop and ask the owner: there is no self-review fallback.
 3. **Merging deploys.** A merge to `main` runs "Deploy to Oracle VM". After **every** merge, docs-only ones included, check that the run **for that merge commit** succeeded. The workflow can also be run by hand, so match the run's `headSha` to the merge commit rather than trusting the latest run:
    ```bash
-   sha=$(gh pr view <n> -R Control-Point-FTC/control-point --json mergeCommit -q .mergeCommit.oid)
-   gh run list -R Control-Point-FTC/control-point --workflow "Deploy to Oracle VM" -L 10 \
+   sha=$(gh pr view <n> -R ZOGWORK/control-point --json mergeCommit -q .mergeCommit.oid)
+   gh run list -R ZOGWORK/control-point --workflow "Deploy to Oracle VM" -L 10 \
      --json databaseId,headSha,status,conclusion -q ".[] | select(.headSha == \"$sha\")"
    ```
    Then confirm https://tryctrlpoint.org serves the new bundle (`index-*.js`; a server-only change keeps the old one). If the run failed, read `gh run view <databaseId> --log-failed` and fix it before merging anything else: a failed deploy silently leaves production on the old build.
@@ -23,7 +23,7 @@ and never renumber.
 5. **User-visible changes ship with screenshots, captured before the PR opens.** If the diff changes anything a member sees (pages, components, styles, copy, or Bruno's visible replies), the PR body embeds at least one screenshot of the rendered change inline, before/after when the change is visual. A link out, a screenshot of code, or a promise to demo later does not satisfy this. A PR with no user-visible change writes "No user-visible change." in the template's Screenshots section rather than deleting it, so the reviewer sees the claim and can disagree.
 6. **Capture the evidence yourself, then attach it with gh.** Run the app (`npm run dev`, or the live site for read-only views), capture the screen with the browser tooling, and save the images **outside the repository** (a temp or scratch directory; never commit screenshots for a PR). Attach them with the GitHub CLI (2.101 or newer; `gh --version`):
    ```bash
-   gh pr create -R Control-Point-FTC/control-point --head <branch> --body-file body.md \
+   gh pr create -R ZOGWORK/control-point --head <branch> --body-file body.md \
      --attach './before-tasks.png#Task sheet before' --attach './after-tasks.png#Task sheet after'
    ```
    A body that references `![alt](./after-tasks.png)` has the reference rewritten to the uploaded asset. `gh pr edit --attach` and `gh pr comment --attach` work the same way. Name files `before-…`/`after-…` so pairs are obvious. Do not open the PR and hand the missing media back as a TODO.
