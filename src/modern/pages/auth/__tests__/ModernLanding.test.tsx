@@ -75,6 +75,29 @@ describe('ModernLanding (v8)', () => {
     expect(wash.querySelectorAll('.landing-wash-glow')).toHaveLength(3);
   });
 
+  it('keeps the screenshots lazy, and lays no demo over a frame until its image has loaded', () => {
+    setup();
+    for (const f of FEATURES) {
+      for (const img of screen.getAllByAltText(f.alt)) expect(img).toHaveAttribute('loading', 'lazy');
+      expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument();
+      fireEvent.load(screen.getAllByAltText(f.alt)[0]);
+      const demo = screen.getByTestId(`demo-${f.shot}`);
+      expect(demo).toHaveAttribute('aria-hidden', 'true');
+      // Inside the frame, beside the image, so it moves with the phone crop.
+      expect(demo.parentElement).toBe(screen.getAllByAltText(f.alt)[0].parentElement);
+    }
+  });
+
+  it('drops the demo when a screenshot falls back to the other theme (its colours would not match)', () => {
+    setup();
+    const f = FEATURES[1];
+    const [dark] = screen.getAllByAltText(f.alt);
+    fireEvent.load(dark);
+    expect(screen.getByTestId(`demo-${f.shot}`)).toBeInTheDocument();
+    fireEvent.error(dark);
+    expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument();
+  });
+
   it("falls back to the other theme's screenshot when one fails, and drops the frame when both do", () => {
     setup();
     const f = FEATURES[0];
@@ -90,11 +113,11 @@ describe('ModernLanding (v8)', () => {
 
   it('uses no yellow or gradient text anywhere on the page, and hex colours only for the wash', () => {
     const read = (f: string) => readFileSync(resolve(__dirname, f), 'utf8');
-    const files = ['../ModernLanding.tsx', '../landing/FeatureRows.tsx', '../landing/LandingWash.tsx', '../landing/landing.css'];
+    const files = ['../ModernLanding.tsx', '../landing/FeatureRows.tsx', '../landing/ShotDemos.tsx', '../landing/LandingWash.tsx', '../landing/landing.css'];
     const all = files.map(read).join(' ');
     expect(all).not.toMatch(/yellow|volt|amber|gold|bg-clip-text|teal|mint/i);
     // The page and rows use tokens only.
-    expect(read('../ModernLanding.tsx') + read('../landing/FeatureRows.tsx')).not.toMatch(/#[0-9a-f]{3,8}(?![0-9a-z])/i);
+    expect(read('../ModernLanding.tsx') + read('../landing/FeatureRows.tsx') + read('../landing/ShotDemos.tsx')).not.toMatch(/#[0-9a-f]{3,8}(?![0-9a-z])/i);
     // The wash's own colours (Control Scout's three) and its black fade mask are the only hex values.
     const hex = new Set((read('../landing/LandingWash.tsx') + read('../landing/landing.css')).match(/#[0-9a-f]{3,8}(?![0-9a-z])/gi)?.map((h) => h.toLowerCase()));
     expect([...hex].sort()).toEqual(['#000', '#5a76ad', '#5f5785', '#91689c']);

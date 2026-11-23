@@ -3,8 +3,9 @@
 // behind the mark, one headline and two buttons; then four feature rows, each with a
 // screenshot of that page; a short list of the rest; a few facts; the FAQ; a closing
 // line; the footer. Same two exits as before: onSignIn and onGetStarted.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
 import { usePublicPageView } from '../../../utils/pageViews';
 import { cn } from '../../../components/cn';
 import {
@@ -42,6 +43,22 @@ const FAQ = [
   { q: 'Do members need their own accounts?', a: 'Yes. Each person signs up (with email, or a Google, Discord or GitHub account where available) and joins your workspace with the access code. Their role decides what they can see and change.' },
   { q: 'Does it work on phones?', a: 'Yes. Every screen works on a phone, including QR check-in and the task board.' },
 ];
+
+/** The hero's pieces settle in one after another on load (logo, headline, line, buttons).
+ *  Same element under reduced motion, which shows them at once. */
+function HeroIn({ children, step, className }: { children: ReactNode; step: number; className?: string }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      className={className}
+      initial={reduce ? false : { opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.8, delay: 0.08 + step * 0.09, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 function useScrolled() {
   const [scrolled, setScrolled] = useState(false);
@@ -81,27 +98,38 @@ export function ModernLanding({ onSignIn, onGetStarted }: { onSignIn: () => void
 
         {/* The bar is fixed (body is the scroller here, so sticky would not hold). */}
         <main id="top" className="relative pt-16">
-          <section className="px-4 pb-20 pt-20 sm:px-6 sm:pb-28 sm:pt-28" aria-labelledby="landing-title">
+          <section className="px-4 pb-28 pt-20 sm:px-6 sm:pb-44 sm:pt-28" aria-labelledby="landing-title">
             <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
-              <BrandLogo className="size-16 rounded-2xl ring-1 ring-ink/12 sm:size-[72px]" decorative />
-              <h1 id="landing-title" className="mt-8 text-balance font-sans text-[2.5rem] font-semibold leading-[1.05] tracking-[-0.035em] sm:text-6xl lg:text-[4.25rem]">
-                The workspace for your robotics team
-              </h1>
-              <p className="mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-                Attendance, tasks, the calendar and the budget for your FTC team, in one place everyone can open on their phone.
-              </p>
-              <div className="mt-9 flex w-full flex-col items-stretch justify-center gap-3 sm:w-auto sm:flex-row sm:items-center">
+              <HeroIn step={0}>
+                <BrandLogo className="size-16 rounded-2xl ring-1 ring-ink/12 sm:size-[72px]" decorative />
+              </HeroIn>
+              <HeroIn step={1}>
+                <h1 id="landing-title" className="mt-8 text-balance font-sans text-[2.5rem] font-semibold leading-[1.05] tracking-[-0.035em] sm:text-6xl lg:text-[4.25rem]">
+                  The workspace for your robotics team
+                </h1>
+              </HeroIn>
+              <HeroIn step={2} className="flex flex-col items-center">
+                <p className="mt-5 max-w-xl text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+                  Attendance, tasks, the calendar and the budget for your FTC team, in one place everyone can open on their phone.
+                </p>
+              </HeroIn>
+              <HeroIn step={3} className="mt-9 flex w-full flex-col items-stretch justify-center gap-3 sm:w-auto sm:flex-row sm:items-center">
                 <Button size="lg" onClick={onGetStarted} className={cn('group h-12 px-6', PRIMARY)}>
                   Create your workspace <ArrowRight className="transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />
                 </Button>
                 <Button size="lg" variant="ghost" onClick={onSignIn} className="h-12 px-6 text-foreground">Sign in</Button>
-              </div>
+              </HeroIn>
             </div>
           </section>
 
+          {/* A clear break after the hero: a hairline and the section's own heading, so the first
+              row reads as the start of the tour rather than the hero's picture. */}
           <section id="features" className="scroll-mt-20 px-4 pb-24 sm:px-6 sm:pb-32" aria-labelledby="features-title">
             <div className="mx-auto max-w-6xl">
-              <h2 id="features-title" className="sr-only">Features</h2>
+              <FadeUp className="mb-16 border-t border-border pt-16 text-center sm:mb-24 sm:pt-24">
+                <h2 id="features-title" className="text-balance font-sans text-3xl font-semibold tracking-[-0.025em] sm:text-4xl">Run the season from one place</h2>
+                <p className="mx-auto mt-3 max-w-lg text-pretty text-muted-foreground">The pages your team opens every week, shown here with a demo team’s data.</p>
+              </FadeUp>
               <FeatureRows />
 
               <FadeUp className="mt-24 border-t border-border pt-10 sm:mt-32">
