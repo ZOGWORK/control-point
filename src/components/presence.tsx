@@ -7,7 +7,7 @@ import { cn } from './onboarding/onboardingState';
 // the setting + session last_activity.
 export const PRESENCE_META: Record<string, { dot: string; label: string; desc: string }> = {
   online: { dot: 'bg-emerald-500', label: 'Online', desc: 'Active now' },
-  idle: { dot: 'bg-amber-400', label: 'Idle', desc: 'Away from keyboard' },
+  idle: { dot: 'bg-warning', label: 'Idle', desc: 'Away from keyboard' },
   dnd: { dot: 'bg-rose-500', label: 'Do Not Disturb', desc: 'Mute all notifications' },
   offline: { dot: 'bg-zinc-500', label: 'Offline', desc: 'Not around right now' },
 };

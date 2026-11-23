@@ -75,9 +75,9 @@ export function VoiceAvatar({
 
 const STATUS_META: Record<ConnectionStatus, { label: string; dot: string; text: string }> = {
   idle: { label: 'Not in a call', dot: 'bg-zinc-500', text: 'text-text-muted' },
-  joining: { label: 'Connecting', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-300' },
+  joining: { label: 'Connecting', dot: 'bg-info animate-pulse', text: 'text-info' },
   connected: { label: 'Connected', dot: 'bg-emerald-400', text: 'text-emerald-300' },
-  reconnecting: { label: 'Reconnecting', dot: 'bg-amber-400 animate-pulse', text: 'text-amber-300' },
+  reconnecting: { label: 'Reconnecting', dot: 'bg-warning animate-pulse', text: 'text-warning' },
   failed: { label: 'Connection failed', dot: 'bg-rose-500', text: 'text-rose-300' },
   ended: { label: 'Call ended', dot: 'bg-zinc-500', text: 'text-text-muted' },
 };
@@ -105,7 +105,7 @@ export function CallStatusPill({ status, className }: { status: ConnectionStatus
 
 const QUALITY_META: Record<ConnectionQuality, { label: string; icon: any; cls: string }> = {
   good: { label: 'Good connection', icon: SignalHigh, cls: 'text-emerald-400' },
-  fair: { label: 'Fair connection', icon: SignalMedium, cls: 'text-amber-400' },
+  fair: { label: 'Fair connection', icon: SignalMedium, cls: 'text-warning' },
   poor: { label: 'Poor connection', icon: SignalLow, cls: 'text-rose-400' },
   unknown: { label: 'Connection unknown', icon: Signal, cls: 'text-text-muted/60' },
 };

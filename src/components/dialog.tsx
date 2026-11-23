@@ -130,7 +130,7 @@ const btnBase =
   'px-4 py-2 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2 font-semibold';
 const btnSecondary = 'bg-elevated text-text-base hover:bg-text-base/10 border border-text-base/10';
 const btnDanger = 'bg-rose-900/30 text-rose-400 hover:bg-rose-900/50 border border-rose-500/30';
-const btnPrimary = 'bg-accent text-accent-ink hover:brightness-105 shadow-[0_4px_16px_rgba(255,199,0,0.25)]';
+const btnPrimary = 'bg-accent text-accent-ink hover:brightness-105';
 
 // Both modals are Radix AlertDialogs portalled to <body>. They are often
 // opened from inside another Radix Dialog/Sheet (e.g. "Delete" in a task's

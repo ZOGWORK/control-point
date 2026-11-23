@@ -358,7 +358,7 @@ function ShortlistCard({ e, ev, confirmedNotes, onPatch, onRemove, onOpen, seaso
     onPatch(kind === 'strengths' ? { addStrengths: [t] } : { addWeaknesses: [t] });
   };
   const removeTag = (kind: 'strengths' | 'weaknesses', t: string) => onPatch(kind === 'strengths' ? { removeStrengths: [t] } : { removeWeaknesses: [t] });
-  const prioClass: Record<ShortlistPriority, string> = { high: 'bg-rose-500/15 text-rose-300 border-rose-500/40', medium: 'bg-amber-500/15 text-amber-300 border-amber-500/40', low: 'bg-text-base/10 text-text-muted border-text-base/20' };
+  const prioClass: Record<ShortlistPriority, string> = { high: 'bg-rose-500/15 text-rose-300 border-rose-500/40', medium: 'bg-warning/15 text-warning border-warning/40', low: 'bg-text-base/10 text-text-muted border-text-base/20' };
   return (
     <div className={cn('card-surface p-4 space-y-3', e.scoutNext && '!border-accent/50')}>
       <div className="flex items-start gap-2">

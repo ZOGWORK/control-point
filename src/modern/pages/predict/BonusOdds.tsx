@@ -18,7 +18,7 @@ export function bonusLabels(season: number): [string, string, string] | null {
 export const callPct = (p: number) => (p < 0.015 ? '1%' : p > 0.985 ? '99%' : `${Math.round(p * 100)}%`);
 
 const TIER: Record<MatchBonusSummary['tier'], { label: string; cls: string }> = {
-  provisional: { label: 'Provisional', cls: 'border-amber-500/30 bg-amber-500/10 text-amber-500' },
+  provisional: { label: 'Provisional', cls: 'border-warning/30 bg-warning/10 text-warning' },
   moderate: { label: 'Moderate', cls: 'border-sky-500/30 bg-sky-500/10 text-sky-500' },
   confident: { label: 'Confident', cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-500' },
 };

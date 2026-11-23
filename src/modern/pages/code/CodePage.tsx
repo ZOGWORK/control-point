@@ -94,7 +94,7 @@ export function CodePage({ teams, currentUser, hasScope, activeTeamId }: { teams
 const SAVE_STATUS = {
   saved: { label: 'All changes saved', icon: Check, cls: 'text-success' },
   saving: { label: 'Saving…', icon: Loader2, cls: 'animate-spin text-sky-500 motion-reduce:animate-none' },
-  unsaved: { label: 'Unsaved changes', icon: AlertCircle, cls: 'text-amber-500' },
+  unsaved: { label: 'Unsaved changes', icon: AlertCircle, cls: 'text-warning' },
 } as const;
 
 function Toolbar({ ctl, onOpenExplorer }: { ctl: Ctl; onOpenExplorer: () => void }) {
@@ -269,7 +269,7 @@ function EditorPane({ ctl }: { ctl: Ctl }) {
         <div className="-mb-px flex h-8 max-w-full items-center gap-2 rounded-t-md border border-b-0 border-border bg-background px-3 text-xs">
           <FileCode2 className="size-3.5 shrink-0 text-accent" />
           <span className="truncate font-mono font-medium">{file.file_name}</span>
-          {ctl.currentBranch === 'drafts' && ctl.autoSaveStatus === 'unsaved' && <span className="size-1.5 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />}
+          {ctl.currentBranch === 'drafts' && ctl.autoSaveStatus === 'unsaved' && <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />}
           {comparing && <Badge variant="outline" className="h-4 px-1 text-[10px]">diff</Badge>}
         </div>
       </div>

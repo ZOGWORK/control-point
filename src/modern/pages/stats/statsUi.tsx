@@ -20,7 +20,7 @@ export function SourceLine({ f, className }: { f: FtcFreshness | null | undefine
   const parts = [origin === 'first-events' ? 'FIRST Events' : 'FTC Scout', (f.cached || f.source === 'cache') && 'cached', f.stale && 'stale', f.partial && 'partial', relTime(f.fetchedAt)].filter(Boolean);
   return (
     <span className={cn('inline-flex items-center gap-1.5 text-xs text-muted-foreground', className)} title={`Fetched ${f.fetchedAt ? new Date(f.fetchedAt).toLocaleString() : 'unknown'}`}>
-      <span className={cn('size-1.5 rounded-full', f.stale ? 'bg-destructive' : f.partial ? 'bg-amber-500' : origin === 'first-events' ? 'bg-success' : 'bg-muted-foreground')} />
+      <span className={cn('size-1.5 rounded-full', f.stale ? 'bg-destructive' : f.partial ? 'bg-warning' : origin === 'first-events' ? 'bg-success' : 'bg-muted-foreground')} />
       {parts.join(' · ')}
     </span>
   );
@@ -115,7 +115,7 @@ export function MatchLine({ p, team, onOpen, eventName }: { p: MatchPerspective;
           <span className="hidden text-xs text-muted-foreground sm:inline">vs</span>
           <TeamChips side="blue" team={team} teams={m.blue.teams} />
           {eventName && <span className="truncate text-xs text-muted-foreground">{eventName}</span>}
-          {p.penaltiesCommitted != null && p.penaltiesCommitted > 0 && <span className="text-xs text-amber-600 dark:text-amber-400">{p.penaltiesCommitted} penalty pts given</span>}
+          {p.penaltiesCommitted != null && p.penaltiesCommitted > 0 && <span className="text-xs text-rose-600 dark:text-rose-300">{p.penaltiesCommitted} penalty pts given</span>}
         </span>
         <span className="flex items-center gap-2">
           <span className="font-display text-sm font-semibold tabular-nums">

@@ -29,7 +29,7 @@ export function StatusChip({ status, className }: { status: PrintStatus; classNa
 
 const PRIORITY_CHIP: Record<PrintPriority, string> = {
   urgent: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300',
-  high: 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  high: 'border-warning/40 bg-warning/10 text-warning',
   normal: 'border-border text-muted-foreground',
   low: 'border-border text-muted-foreground',
 };
@@ -47,7 +47,7 @@ export function PriorityChip({ priority, className }: { priority: PrintPriority;
 export function DueChip({ due, className }: { due: string; className?: string }) {
   const s = dueState(due);
   return (
-    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap text-xs', s === 'overdue' ? 'font-medium text-rose-600 dark:text-rose-300' : s === 'today' || s === 'soon' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground', className)}>
+    <span className={cn('inline-flex items-center gap-1 whitespace-nowrap text-xs', s === 'overdue' ? 'font-medium text-rose-600 dark:text-rose-300' : s === 'today' || s === 'soon' ? 'text-warning' : 'text-muted-foreground', className)}>
       <CalendarClock className="size-3.5" aria-hidden />{dueText(due)}
     </span>
   );
@@ -59,8 +59,10 @@ export function copiesText(f: PrintFile): string | null {
   return `${Math.min(f.copiesPrinted, 999)} of ${f.copiesNeeded} printed`;
 }
 
+// File art sits on a dark tile in both themes, so Light lifts the accent toward white to stay readable.
+const MODEL_TINT = 'text-[color-mix(in_srgb,var(--color-accent)_55%,white)] dark:text-accent';
 const KIND_TINT: Record<PrintKind, string> = {
-  stl: 'text-[#b38b00] dark:text-[#ffc700]', '3mf': 'text-[#b38b00] dark:text-[#ffc700]', obj: 'text-[#b38b00] dark:text-[#ffc700]',
+  stl: MODEL_TINT, '3mf': MODEL_TINT, obj: MODEL_TINT,
   step: 'text-sky-600 dark:text-sky-300', gcode: 'text-emerald-600 dark:text-emerald-300',
 };
 
@@ -81,7 +83,7 @@ export function FileArt({ file, size = 'sm', className }: { file: PrintFile; siz
 
 export function FolderArt({ open, className }: { open?: boolean; className?: string }) {
   const I = open ? FolderOpen : Folder;
-  return <I className={cn('text-[#b38b00] dark:text-[#ffc700]', className)} strokeWidth={1.6} aria-hidden />;
+  return <I className={cn('text-accent', className)} strokeWidth={1.6} aria-hidden />;
 }
 
 /** One line of text asked for: a new folder or collection, or a rename. */
@@ -149,7 +151,7 @@ export function MoveDialog({ folders, count, exclude, current, onClose, onMove }
       <li key={id ?? 'root'}>
         <label className={cn('flex min-h-10 cursor-pointer items-center gap-2 rounded-lg px-2 text-sm hover:bg-muted/60', pick === id && 'bg-accent/15', disabled && 'cursor-not-allowed opacity-50')}
           style={{ paddingLeft: 8 + depth * 18 }}>
-          <input type="radio" name="prints-move" className="size-4 accent-[#ffc700]" checked={pick === id} disabled={disabled} onChange={() => setPick(id)} />
+          <input type="radio" name="prints-move" className="size-4 accent-accent" checked={pick === id} disabled={disabled} onChange={() => setPick(id)} />
           <FolderArt className="size-4 shrink-0" />
           <span className="truncate">{f ? f.name : 'Prints (top level)'}</span>
           {id === current && <span className="ml-auto shrink-0 text-xs text-muted-foreground">current</span>}

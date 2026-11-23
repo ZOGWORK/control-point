@@ -1,4 +1,4 @@
-// Work-in-progress limit on a board column: "3 / 4", amber at the limit and
+// Work-in-progress limit on a board column: "3 / 4", orange at the limit and
 // red over it. Admins set or clear it from the same control (team setting).
 import { useState } from 'react';
 import { Gauge } from 'lucide-react';
@@ -20,7 +20,7 @@ export function WipLimit({ column, count, limit, canEdit, onSave }: {
   const at = !!limit && count === limit;
   const badge = limit ? (
     <span
-      className={cn('rounded-full px-1.5 text-xs tabular-nums', over ? 'bg-destructive/15 text-destructive' : at ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'text-muted-foreground')}
+      className={cn('rounded-full px-1.5 text-xs tabular-nums', over ? 'bg-destructive/15 text-destructive' : at ? 'bg-warning/15 text-warning' : 'text-muted-foreground')}
       title={over ? `Over the limit of ${limit}` : at ? `At the limit of ${limit}` : `Limit ${limit}`}
     >
       {count} / {limit}<span className="sr-only">{over ? ', over the limit' : at ? ', at the limit' : ''}</span>

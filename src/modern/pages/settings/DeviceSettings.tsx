@@ -16,7 +16,7 @@ import { SettingsGroup, SettingsRow } from './SettingsPage';
 const DEFAULT = '__default';
 
 function Perm({ label, state }: { label: string; state: PermState }) {
-  const tone = state === 'granted' ? 'border-success/40 text-success' : state === 'denied' ? 'border-destructive/40 text-destructive' : 'border-amber-500/40 text-amber-500';
+  const tone = state === 'granted' ? 'border-success/40 text-success' : state === 'denied' ? 'border-destructive/40 text-destructive' : 'border-warning/40 text-warning';
   const text = state === 'granted' ? 'Allowed' : state === 'denied' ? 'Blocked' : state === 'prompt' ? 'Not asked yet' : 'Unknown';
   return <span className="inline-flex items-center gap-1.5 text-sm">{label}<Badge variant="outline" className={tone}>{text}</Badge></span>;
 }
@@ -27,7 +27,7 @@ function Meter({ level }: { level: number }) {
   return (
     <div className="flex h-3 flex-1 gap-0.5" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={20} aria-valuenow={lit}>
       {Array.from({ length: 20 }, (_, i) => (
-        <span key={i} className={cn('flex-1 rounded-sm transition-colors duration-75', i < lit ? (i > 15 ? 'bg-destructive' : i > 11 ? 'bg-amber-500' : 'bg-success') : 'bg-muted')} />
+        <span key={i} className={cn('flex-1 rounded-sm transition-colors duration-75', i < lit ? (i > 15 ? 'bg-destructive' : i > 11 ? 'bg-warning' : 'bg-success') : 'bg-muted')} />
       ))}
     </div>
   );

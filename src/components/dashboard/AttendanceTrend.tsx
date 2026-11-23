@@ -87,7 +87,7 @@ export function AttendanceTrendChart({ attendance, className = 'h-44', hiddenDat
   const dataMax = useMemo(() => Math.max(0, ...chartData.map((d) => d.count ?? 0)), [chartData]);
   const lastIdx = useMemo(() => chartData.reduce((acc, d, i) => (d.count != null ? i : acc), -1), [chartData]);
   const nextDate = chartData.find((d) => d.next)?.date;
-  const accentColor = cssVar('--color-accent', '#FFC700');
+  const accentColor = cssVar('--color-accent', '#a3b6e0');
   const secondaryColor = cssVar('--color-secondary', '#1A1A1A');
   const gridColor = theme === 'light' ? '#09090b2e' : '#ffffff2e';
   const endDotFill = theme === 'light' ? '#09090b' : '#ffffff';

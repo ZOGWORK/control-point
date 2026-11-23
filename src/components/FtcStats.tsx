@@ -151,7 +151,7 @@ function SeasonPills({ seasons, active, onPick, small }: { seasons: number[]; ac
           className={
             `rounded-full font-bold transition-all ${small ? 'px-3 py-1 text-xs' : 'px-4 py-1.5 text-sm'} ` +
             (s === active
-              ? 'bg-accent text-accent-ink shadow-[0_4px_16px_rgba(255,199,0,0.25)]'
+              ? 'bg-accent text-accent-ink'
               : 'bg-text-base/5 text-text-muted hover:text-text-base hover:bg-text-base/10 border border-text-base/10')
           }
         >
@@ -227,7 +227,7 @@ export function FtcTeamCard() {
         </div>
         <button
           onClick={() => navigate('/settings?section=workspace')}
-          className="flex items-center gap-2 bg-accent text-accent-ink font-bold px-5 py-2.5 rounded-xl hover:brightness-105 shadow-[0_4px_16px_rgba(255,199,0,0.25)] whitespace-nowrap"
+          className="flex items-center gap-2 bg-accent text-accent-ink font-bold px-5 py-2.5 rounded-xl hover:brightness-105 whitespace-nowrap"
         >
           <SettingsIcon className="w-4 h-4" /> Connect team
         </button>

@@ -41,7 +41,7 @@ export function FactorSheetPanel({ sheet, className }: { sheet: FactorSheet; cla
       <div className="space-y-3 border-t border-border px-3 pb-3 pt-2.5">
         <TugOfWar sheet={sheet} />
         {Math.abs(sheet.logit) < COIN_FLIP && (
-          <p className="rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs">This call is close to a coin flip. Strong factors can pull in opposite directions and cancel each other.</p>
+          <p className="rounded-md bg-warning/10 px-2.5 py-1.5 text-xs">This call is close to a coin flip. Strong factors can pull in opposite directions and cancel each other.</p>
         )}
         <div className="grid gap-4 @3xl:grid-cols-2 @3xl:gap-x-8">
           <div className="space-y-4">

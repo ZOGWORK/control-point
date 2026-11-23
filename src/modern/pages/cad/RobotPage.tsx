@@ -272,7 +272,7 @@ function BomGroupTable({ group, items, onOpen, highlight, saving, stepZip }: { g
         {(group === 'buy' || group === 'hardware') && <span className="text-sm tabular-nums text-muted-foreground">{priced ? `${money(subtotal)} · ${priced} of ${items.length} priced` : 'No prices yet'}</span>}
         {group === 'make' && stepZip?.url && <a href={stepZip.url} download={stepZip.name} className="inline-flex items-center gap-1 text-sm underline-offset-4 hover:underline"><Download className="size-4" /> STEP files</a>}
       </div>
-      <div className={cn('overflow-x-auto rounded-xl border border-border border-t-2', group === 'review' ? 'border-t-orange-400' : group === 'buy' ? 'border-t-sky-400' : group === 'make' ? 'border-t-[#ffc700]' : '')}>
+      <div className={cn('overflow-x-auto rounded-xl border border-border border-t-2', group === 'review' ? 'border-t-orange-400' : group === 'buy' ? 'border-t-sky-400' : group === 'make' ? 'border-t-[#c4a7e7]' : '')}>
         <Table>
           <TableHeader>
             <TableRow><TableHead>Part</TableHead><TableHead className="text-right">Qty</TableHead><TableHead>Type</TableHead><TableHead>Product</TableHead><TableHead className="text-right">Cost</TableHead></TableRow>

@@ -70,7 +70,7 @@ function MyStatusStrip({
             'px-3 py-1.5 rounded-xl border flex items-center gap-3 text-sm font-bold',
             myStatus.status === 'P' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
             myStatus.status === 'A' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' :
-            myStatus.status === 'L' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+            myStatus.status === 'L' ? 'bg-warning/10 border-warning/30 text-warning' :
             'bg-blue-500/10 border-blue-500/30 text-blue-400'
           )}>
             <span className="flex items-center gap-2">
@@ -84,7 +84,7 @@ function MyStatusStrip({
             <Button onClick={() => handleSelfReport('P')} variant="outline" className="text-xs border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/10" disabled={isAiLoading || isLoading}>
               <CheckSquare className="w-3.5 h-3.5" /> {t('dashboard.imHere')}
             </Button>
-            <Button onClick={() => handleSelfReport('L')} variant="outline" className="text-xs border-amber-500/50 text-amber-400 hover:bg-amber-500/10" disabled={isAiLoading || isLoading}>
+            <Button onClick={() => handleSelfReport('L')} variant="outline" className="text-xs border-warning/50 text-warning hover:bg-warning/10" disabled={isAiLoading || isLoading}>
               <Clock className="w-3.5 h-3.5" /> {t('dashboard.statusLate')}
             </Button>
             <Button onClick={() => setShowOut(true)} variant="secondary" className="text-xs" disabled={isAiLoading || isLoading}>

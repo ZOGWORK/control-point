@@ -42,7 +42,7 @@ export function OutlookTab({ fc, myTeam }: FcProps) {
   const p = me.points;
   const parts = [
     { k: 'Quals rank', v: p.quals, cls: 'bg-accent' },
-    { k: 'Alliance selection', v: p.alliance, cls: 'bg-amber-500' },
+    { k: 'Alliance selection', v: p.alliance, cls: 'bg-orange-400 dark:bg-[#fdba74]' },
     { k: 'Playoffs', v: p.playoffs, cls: 'bg-sky-500' },
     { k: 'Awards', v: p.awards ?? 0, cls: 'bg-fuchsia-500' },
   ];
@@ -355,7 +355,7 @@ function MatchRow({ m, myTeam, season, reasons = [] }: { m: NonNullable<Forecast
       {m.bonus && <BonusOdds season={season} bonus={m.bonus} className="col-span-2 sm:col-span-5" />}
       {!m.played && m.history ? <PairHistory history={m.history} /> : null}
       {reasons.length > 0 && (
-        <ul className="col-span-2 space-y-0.5 text-xs text-amber-600 dark:text-amber-400 sm:col-span-4 sm:col-start-2" data-testid="match-reasons">
+        <ul className="col-span-2 space-y-0.5 text-xs text-warning sm:col-span-4 sm:col-start-2" data-testid="match-reasons">
           {reasons.map((r) => <li key={r}>{r}</li>)}
         </ul>
       )}
@@ -384,7 +384,7 @@ function CallBadge({ pre, played }: { pre: number | null; played: { red: number;
   if (c.kind === 'even') return null;
   return c.kind === 'called'
     ? <Badge variant="success" title={`Before the match: ${c.fav} ${pct(c.favP)}`}>Called it · {pct(c.favP)}</Badge>
-    : <Badge className="border-amber-500/30 bg-amber-500/15 text-amber-500" variant="outline" title={`Before the match the winner had ${pct(1 - c.favP)}`}>Upset · {pct(1 - c.favP)}</Badge>;
+    : <Badge className="border-warning/30 bg-warning/15 text-warning" variant="outline" title={`Before the match the winner had ${pct(1 - c.favP)}`}>Upset · {pct(1 - c.favP)}</Badge>;
 }
 
 /** "±14": from the displayed (rounded) score to the range's whole-point bounds, the larger side, so

@@ -175,7 +175,7 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
             <div className="grid gap-2 sm:col-span-2">
               <Label htmlFor="profile-accent">Personal accent</Label>
               <div className="flex flex-wrap items-center gap-2">
-                <input type="color" aria-label="Pick accent colour" className="size-9 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" value={validHex(form.accent) ? form.accent : '#FFC700'} onChange={(e) => set({ accent: e.target.value })} />
+                <input type="color" aria-label="Pick accent colour" className="size-9 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" value={validHex(form.accent) ? form.accent : '#a3b6e0'} onChange={(e) => set({ accent: e.target.value })} />
                 <Input id="profile-accent" value={form.accent} onChange={(e) => set({ accent: e.target.value })} placeholder="Team default" className="w-36 font-mono" />
                 {form.accent && <Button type="button" variant="ghost" size="sm" onClick={() => set({ accent: '' })}><RotateCcw /> Use team default</Button>}
               </div>

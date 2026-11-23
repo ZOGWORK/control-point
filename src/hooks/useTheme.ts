@@ -72,7 +72,7 @@ export function setAppearance(choice: ThemeChoice): Theme {
 /**
  * Light/dark theme state for Control Point.
  *
- * - Default 'dark' — preserves the app's current Volt & Carbon look.
+ * - Default 'dark' — the app's graphite & slate look.
  * - Persisted to localStorage ('cp-theme').
  * - Toggles the `light` class on <html>; src/index.css redefines the design
  *   tokens under `html.light` and flips Tailwind's white/black utilities,

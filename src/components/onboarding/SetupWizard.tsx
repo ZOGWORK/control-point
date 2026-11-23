@@ -241,7 +241,7 @@ export default function SetupWizard({
               >
                 <span className="block rounded-xl overflow-hidden border border-text-base/10" aria-hidden="true">
                   <span className="block h-16 p-2" style={{ backgroundColor: '#09090b' }}>
-                    <span className="block h-2 w-2/3 rounded-full mb-1.5" style={{ backgroundColor: '#ffc700' }} />
+                    <span className="block h-2 w-2/3 rounded-full mb-1.5" style={{ backgroundColor: '#a3b6e0' }} />
                     <span className="block h-1.5 w-full rounded-full mb-1" style={{ backgroundColor: '#26262c' }} />
                     <span className="block h-1.5 w-4/5 rounded-full" style={{ backgroundColor: '#26262c' }} />
                   </span>
@@ -271,7 +271,7 @@ export default function SetupWizard({
               >
                 <span className="block rounded-xl overflow-hidden border border-black/10" aria-hidden="true">
                   <span className="block h-16 p-2" style={{ backgroundColor: '#f4f4f2' }}>
-                    <span className="block h-2 w-2/3 rounded-full mb-1.5" style={{ backgroundColor: '#ffc700' }} />
+                    <span className="block h-2 w-2/3 rounded-full mb-1.5" style={{ backgroundColor: '#3f5a96' }} />
                     <span className="block h-1.5 w-full rounded-full mb-1" style={{ backgroundColor: '#d8d8d4' }} />
                     <span className="block h-1.5 w-4/5 rounded-full" style={{ backgroundColor: '#d8d8d4' }} />
                   </span>

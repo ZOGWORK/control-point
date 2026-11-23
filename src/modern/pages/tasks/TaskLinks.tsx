@@ -28,7 +28,7 @@ export function TaskLinkMarks({ task, byId }: { task: any; byId: Map<number, any
   return (
     <>
       {blockers.length > 0 && isOpenStatus(task.status) && (
-        <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-700 dark:text-amber-300" title={`Blocked by ${blockers.map((b) => b.title).join(', ')}`}>
+        <Badge variant="outline" className="gap-1 border-text-faint/50 text-muted-foreground" title={`Blocked by ${blockers.map((b) => b.title).join(', ')}`}>
           <Lock className="size-3" /> Blocked
         </Badge>
       )}
@@ -66,8 +66,8 @@ export function TaskLinksSection({ task, tasks, canEdit, onOpenTask, onAdd, onRe
     <section aria-label="Linked tasks" className="space-y-3">
       <Label className="block">Links</Label>
       {blockers.length > 0 && isOpenStatus(task.status) && (
-        <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-sm">
-          <Lock className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" aria-hidden />
+        <p className="flex items-start gap-2 rounded-lg border border-ink/12 bg-ink/5 p-2.5 text-sm">
+          <Lock className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
           Blocked by {blockers.length === 1 ? 'an unfinished task' : `${blockers.length} unfinished tasks`}. It's free to start once {blockers.length === 1 ? 'that is' : 'they are'} done.
         </p>
       )}

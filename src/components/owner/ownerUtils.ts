@@ -10,7 +10,7 @@ export function aiStatusOf(u: any) {
   if (!u) return { label: '—', cls: 'bg-text-base/5 text-text-muted' };
   if (u.ai_disabled === 1) return { label: 'AI disabled', cls: 'bg-rose-500/15 text-rose-400' };
   if (u.ai_timeout_until && new Date(String(u.ai_timeout_until).replace(' ', 'T') + 'Z').getTime() > Date.now())
-    return { label: 'Timed out', cls: 'bg-amber-500/15 text-amber-400' };
+    return { label: 'Timed out', cls: 'bg-warning/15 text-warning' };
   if (u.ai_daily_token_limit) return { label: `${fmtTokens(u.ai_daily_token_limit)}/day`, cls: 'bg-sky-500/15 text-sky-400' };
   return { label: 'AI ok', cls: 'bg-emerald-500/15 text-emerald-400' };
 }
@@ -24,7 +24,7 @@ export function loginChips(u: any) {
 }
 
 export const FLAG_REASONS: Record<string, { label: string; cls: string }> = {
-  'homework': { label: 'Homework-like', cls: 'bg-amber-500/15 text-amber-400' },
+  'homework': { label: 'Homework-like', cls: 'bg-warning/15 text-warning' },
   'spam': { label: 'Spam burst', cls: 'bg-rose-500/15 text-rose-400' },
   'excessive-use': { label: 'Excessive use', cls: 'bg-orange-500/15 text-orange-400' },
 };
@@ -32,7 +32,7 @@ export const FLAG_REASONS: Record<string, { label: string; cls: string }> = {
 export const FLAG_STATUSES: Record<string, { label: string; cls: string }> = {
   'open': { label: 'Open', cls: 'bg-rose-500/15 text-rose-400' },
   'dismissed': { label: 'Dismissed', cls: 'bg-text-base/5 text-text-muted' },
-  'warned': { label: 'Warned', cls: 'bg-amber-500/15 text-amber-400' },
+  'warned': { label: 'Warned', cls: 'bg-warning/15 text-warning' },
   'timed_out': { label: 'Timed out', cls: 'bg-orange-500/15 text-orange-400' },
   'ai_disabled': { label: 'AI disabled', cls: 'bg-rose-500/20 text-rose-300' },
 };

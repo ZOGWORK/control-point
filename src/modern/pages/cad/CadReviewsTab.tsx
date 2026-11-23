@@ -26,7 +26,7 @@ export const STATUS_TONE: Record<string, string> = {
   concept: 'border-border bg-muted text-muted-foreground',
   in_review: 'border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-300',
   approved: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
-  changes_requested: 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-300',
+  changes_requested: 'border-warning/30 bg-warning/15 text-warning',
   built: 'border-accent/30 bg-accent/15 text-accent',
 };
 const MOVE_ICON: Record<string, typeof Check> = { in_review: Eye, approved: Check, changes_requested: RotateCcw, built: Hammer };
@@ -108,7 +108,7 @@ function Flow({ status }: { status: string }) {
     <ol className="grid grid-cols-4 gap-1.5" aria-label="Review progress">
       {FLOW.map((s, i) => (
         <li key={s} aria-current={i === at ? 'step' : undefined} className="min-w-0">
-          <span className={cn('block h-1.5 rounded-full transition-colors duration-500', i <= at ? (status === 'changes_requested' && i === at ? 'bg-amber-500' : 'bg-accent') : 'bg-muted')} />
+          <span className={cn('block h-1.5 rounded-full transition-colors duration-500', i <= at ? (status === 'changes_requested' && i === at ? 'bg-warning' : 'bg-accent') : 'bg-muted')} />
           <span className={cn('mt-1 block truncate text-[11px]', i === at ? 'font-medium text-foreground' : 'text-muted-foreground')}>
             {i === at && status === 'changes_requested' ? 'Changes requested' : REVIEW_STATUS_LABELS[s]}
           </span>

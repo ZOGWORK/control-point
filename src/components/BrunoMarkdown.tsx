@@ -7,7 +7,7 @@ import { Check, Copy } from 'lucide-react';
 /**
  * Shared Markdown renderer for all Bruno surfaces (sidebar panel, full-page
  * view, dashboard bar). Gives code blocks consistent spacing plus a working
- * copy button, renders blockquotes as amber warning callouts so safety
+ * copy button, renders blockquotes as orange warning callouts so safety
  * notes Bruno writes are easy to spot, and supports GFM (tables, task
  * lists, strikethrough) so spec comparisons don't render as raw pipes.
  */
@@ -55,7 +55,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 function Callout({ children }: { children?: ReactNode }) {
   return (
-    <blockquote className="border-l-2 border-amber-400/70 bg-amber-400/[0.07] rounded-r-xl px-3.5 py-2.5 my-3 text-text-base/85 [&>p]:my-1">
+    <blockquote className="border-l-2 border-warning/70 bg-warning/[0.07] rounded-r-xl px-3.5 py-2.5 my-3 text-text-base/85 [&>p]:my-1">
       {children}
     </blockquote>
   );
