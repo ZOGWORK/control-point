@@ -44,7 +44,8 @@ describe('BrandLogo', () => {
     const root = join(fileURLToPath(import.meta.url), '../../..'); // src/
     const files = (readdirSync(root, { recursive: true }) as string[])
       .filter((f) => /\.tsx?$/.test(f) && !/__tests__/.test(f) && !/BrandMark\.tsx$/.test(f));
-    const offenders = files.filter((f) => /\/logo\.png\?v=/.test(readFileSync(join(root, f), 'utf8')));
+    // Any mention, versioned or not: an unversioned copy would bypass the cache-buster entirely.
+    const offenders = files.filter((f) => /logo\.png/.test(readFileSync(join(root, f), 'utf8')));
     expect(offenders).toEqual([]);
   });
 
@@ -91,30 +92,31 @@ describe('brand cache-busters', () => {
     return v!;
   };
 
+  // One rule for every brand file: the version the manifest's icons carry. A mark change bumps them all.
   it('lists every manifest icon at one version', () => {
     iconVersion();
   });
 
-  const pages = ['../../../index.html', '../../../server/predict/how-it-works.html'];
-
-  it('gives the link preview one version on every page (og and twitter tags)', () => {
-    const found = pages.flatMap((page) => {
-      const v = [...read(page).matchAll(/\/og-image\.jpg\?v=(\d+)["']/g)].map((m) => m[1]);
-      expect(v, page).toHaveLength(2);
-      return v;
-    });
-    expect(new Set(found).size).toBe(1);
+  it('serves the in-app logo at the same version', () => {
+    expect(LOGO_SRC).toBe(`/logo.png?v=${iconVersion()}`);
   });
 
+  const pages = ['../../../index.html', '../../../server/predict/how-it-works.html'];
+  // Each page must link these (the og-image twice: og and twitter tags).
+  const required: Record<string, number> = { 'manifest.webmanifest': 1, 'favicon.png': 1, 'apple-touch-icon.png': 1, 'og-image.jpg': 2 };
+  const brandFiles = [...Object.keys(required), 'logo.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
+
   for (const page of pages) {
-    it(`${page.split('/').pop()} links the manifest, favicon and touch icon at the icons' version`, () => {
+    it(`${page.split('/').pop()} links every brand file at that version, and nothing unversioned`, () => {
       const v = iconVersion();
       const html = read(page);
-      // Anchored on the closing quote, so ?v=70 can't pass for ?v=7.
-      for (const file of ['manifest.webmanifest', 'favicon.png', 'apple-touch-icon.png']) {
-        const found = [...html.matchAll(new RegExp(`/${file.replace('.', '\\.')}\\?v=(\\d+)["']`, 'g'))].map((m) => m[1]);
-        expect(found.length, file).toBeGreaterThan(0);
-        expect(new Set(found), file).toEqual(new Set([v]));
+      for (const file of brandFiles) {
+        const name = file.replace(/[.-]/g, (c) => `\\${c}`);
+        const all = html.match(new RegExp(`(?<![\\w-])${name}`, 'g')) ?? [];
+        // Anchored on the closing quote, so ?v=70 can't pass for ?v=7.
+        const current = html.match(new RegExp(`(?<![\\w-])${name}\\?v=${v}["']`, 'g')) ?? [];
+        expect(current.length, `${file}: every reference at ?v=${v}`).toBe(all.length);
+        if (required[file]) expect(all.length, file).toBe(required[file]);
       }
     });
   }

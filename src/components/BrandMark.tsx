@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { cn } from './ui';
 
 /** The logo's URL. Bump the version whenever scripts/make-icons.py changes the mark; every logo <img> uses this. */
-export const LOGO_SRC = '/logo.png?v=6';
+export const LOGO_SRC = '/logo.png?v=7';
 
 /**
  * BrandMark — the Control Point logo slot.
