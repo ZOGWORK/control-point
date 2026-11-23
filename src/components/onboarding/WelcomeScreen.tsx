@@ -85,7 +85,6 @@ export default function WelcomeScreen({ userName, onGetStarted, onSkip }: Welcom
               className={cn(
                 'w-full py-3.5 rounded-xl font-bold text-[15px] flex items-center justify-center gap-2',
                 'bg-accent text-accent-ink hover:brightness-105 active:scale-[0.99] transition-all',
-                'shadow-[0_4px_16px_rgba(255,199,0,0.25)]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-secondary'
               )}
             >

@@ -674,7 +674,7 @@ export function MatchRow({ p, team, onOpen, eventName }: { p: MatchPerspective; 
         <ResultPill result={p.result} />
       </span>
       {p.penaltiesCommitted != null && p.penaltiesCommitted > 0 && (
-        <span className="col-start-2 col-span-2 text-[10px] text-amber-300">{p.penaltiesCommitted} penalty pts given by {c.label.toLowerCase()}</span>
+        <span className="col-start-2 col-span-2 text-[10px] text-rose-300">{p.penaltiesCommitted} penalty pts given by {c.label.toLowerCase()}</span>
       )}
     </button>
   );

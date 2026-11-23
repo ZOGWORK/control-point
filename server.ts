@@ -2091,7 +2091,7 @@ async function ensureRolesSeeded(teamId: number | null | undefined) {
   if (!names.has("Admin")) {
     const adminRole = (await dbRun(
       "INSERT INTO roles (team_id, name, color, permissions, position, is_system) VALUES (?,?,?,?,?,1)",
-      teamId, "Admin", "#FFC700", JSON.stringify(["*"]), 0
+      teamId, "Admin", "#A3B6E0", JSON.stringify(["*"]), 0
     )) as any;
     adminRoleId = Number(adminRole.lastInsertRowid);
   }
@@ -2253,7 +2253,7 @@ function ownerEmails(): string[] {
 
 // Theme colors must be real 6-digit hex values. Junk strings (e.g. "null",
 // " ", "#") would make var(--color-accent) invalid and silently strip the
-// volt yellow from the whole UI, so they are stored as NULL (theme default).
+// accent colour from the whole UI, so they are stored as NULL (theme default).
 function cleanHex(v: any): string | null {
   return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v.trim())) ? v.trim() : null;
 }
@@ -7530,7 +7530,7 @@ async function startServer() {
     res.json({ state: merged });
   });
 
-  // Reset theme colors to the default Volt & Carbon palette: clears the
+  // Reset theme colors to the default graphite & slate palette: clears the
   // member's personal overrides, and the team's (for workspace managers).
   app.post("/api/theme/reset", async (req, res) => {    const auth = await requireAuth(req, res);
     if (!auth) return;

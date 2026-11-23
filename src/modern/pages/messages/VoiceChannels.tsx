@@ -45,7 +45,7 @@ export function VoiceChannels() {
                     </span>
                     <span className="min-w-0 flex-1 truncate">{c.name}</span>
                     {c.isTemporary && <Badge variant="outline" className="border-accent/40 text-accent">Live call</Badge>}
-                    {c.locked && <Lock className="size-3.5 shrink-0 text-amber-500" aria-label="Locked" />}
+                    {c.locked && <Lock className="size-3.5 shrink-0 text-muted-foreground" aria-label="Locked" />}
                     {c.isPrivate && !c.locked && <EyeOff className="size-3.5 shrink-0" aria-label="Private" />}
                     {live > 0 && <span className="shrink-0 text-xs tabular-nums" aria-label={`${live} ${live === 1 ? 'person' : 'people'} in channel`}>{live}</span>}
                     {joining && <Loader2 className="size-3.5 shrink-0 animate-spin" aria-label="Joining" />}

@@ -82,7 +82,7 @@ export function ShortlistBoard({ season, entries, confirmed, onPatch, onRemove, 
 
 const PRIORITY: Record<ShortlistPriority, string> = {
   high: 'data-[state=on]:bg-rose-500/15 data-[state=on]:text-rose-600 dark:data-[state=on]:text-rose-300',
-  medium: 'data-[state=on]:bg-amber-500/15 data-[state=on]:text-amber-600 dark:data-[state=on]:text-amber-300',
+  medium: 'data-[state=on]:bg-warning/15 data-[state=on]:text-warning',
   low: '',
 };
 

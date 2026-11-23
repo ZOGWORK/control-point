@@ -43,7 +43,7 @@ export function isOverdue(t: any) {
 }
 
 export const REVIEW_META: Record<string, { label: string; tone: string }> = {
-  pending: { label: 'Awaiting review', tone: 'border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-300' },
+  pending: { label: 'Awaiting review', tone: 'border-warning/40 bg-warning/15 text-warning' },
   approved: { label: 'Approved', tone: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
   changes_requested: { label: 'Changes requested', tone: 'border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-300' },
 };

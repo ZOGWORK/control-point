@@ -35,7 +35,7 @@ export function useChartStyle(): ModernChartStyle {
   const line = light ? 'rgba(10,10,12,0.08)' : 'rgba(255,255,255,0.07)';
   return {
     modern: mode === 'modern',
-    accent: cssVar('--color-accent', '#ffc700'),
+    accent: cssVar('--color-accent', '#a3b6e0'),
     success: cssVar('--color-success', '#34d399'),
     info: cssVar('--color-info', '#38bdf8'),
     muted: light ? '#a1a1aa' : '#52525b',

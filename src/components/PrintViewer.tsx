@@ -115,7 +115,7 @@ export default function PrintViewer({ url, kind, name, onLoaded }: {
       >
         {state === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-zinc-400" aria-live="polite">
-            <div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-[#ffc700] motion-reduce:animate-none" aria-hidden />
+            <div className="size-8 animate-spin rounded-full border-2 border-white/10 border-t-accent motion-reduce:animate-none" aria-hidden />
             Loading the model…
           </div>
         )}

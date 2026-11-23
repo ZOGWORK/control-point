@@ -144,7 +144,7 @@ export function AppearanceSection({ isAdmin }: { isAdmin?: boolean }) {
             : 'The grid uses your team colour, set by your workspace admins.'}
         >
           <span className="flex items-center gap-2">
-            <span aria-hidden="true" className="size-6 rounded-md border border-border" style={{ backgroundColor: 'rgb(var(--grid-rgb, 255 199 0))' }} />
+            <span aria-hidden="true" className="size-6 rounded-md border border-border" style={{ backgroundColor: 'rgb(var(--grid-rgb, 163 182 224))' }} />
             {isAdmin && (
               <Button variant="outline" size="sm" onClick={() => navigate('/teams?tab=workspaces')}><Palette /> Team colour</Button>
             )}

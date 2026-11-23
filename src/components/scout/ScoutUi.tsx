@@ -48,7 +48,7 @@ export function SeasonPicker({ seasons, value, onChange, small }: { seasons: num
             'rounded-full font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60',
             small ? 'px-3 py-1 text-xs' : 'px-4 py-1.5 text-sm',
             s === value
-              ? 'bg-accent text-accent-ink shadow-[0_4px_16px_rgba(255,199,0,0.25)]'
+              ? 'bg-accent text-accent-ink'
               : 'bg-text-base/5 text-text-muted hover:text-text-base hover:bg-text-base/10 border border-text-base/10'
           )}
         >
@@ -78,7 +78,7 @@ export function SourceBadge({ f, className }: { f: FtcFreshness | null | undefin
   if (!f) return null;
   const origin = f.source === 'cache' ? f.origin : f.source;
   const label = origin === 'first-events' ? 'FIRST Events live' : 'FTC Scout fallback';
-  const tone = f.stale ? 'border-rose-400/40 text-rose-300' : f.partial ? 'border-amber-400/40 text-amber-300' : origin === 'first-events' ? 'border-emerald-400/40 text-emerald-300' : 'border-text-base/20 text-text-muted';
+  const tone = f.stale ? 'border-rose-400/40 text-rose-300' : f.partial ? 'border-warning/40 text-warning' : origin === 'first-events' ? 'border-emerald-400/40 text-emerald-300' : 'border-text-base/20 text-text-muted';
   return (
     <span
       className={cn('inline-flex flex-wrap items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border', tone, className)}
@@ -282,7 +282,7 @@ export function placementClass(rank: number | null): string {
 export const fmt = (v: number | null | undefined, digits = 1): string => (v == null ? '—' : Number.isInteger(v) ? String(v) : v.toFixed(digits));
 
 // ---------------------------------------------------------------------------
-// Alliance + season colors (immersive accents on the dark/volt design)
+// Alliance + season colors (immersive accents on the dark design)
 // ---------------------------------------------------------------------------
 
 /** Red / blue alliance styling: tinted surface, edge, text, solid chip. */
@@ -309,7 +309,7 @@ export const ALLIANCE = {
 
 /** Signature color per FTC season, used for the season chip and trend accents. */
 export const SEASON_COLOR: Record<number, { hex: string; chip: string }> = {
-  2022: { hex: '#F59E0B', chip: 'bg-amber-500/15 text-amber-300 border-amber-500/30' },     // POWERPLAY
+  2022: { hex: '#FDBA74', chip: 'bg-[#fdba74]/15 text-[#fdba74] border-[#fdba74]/30' },     // POWERPLAY
   2023: { hex: '#A855F7', chip: 'bg-purple-500/15 text-purple-300 border-purple-500/30' },  // CENTERSTAGE
   2024: { hex: '#06B6D4', chip: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' },        // INTO THE DEEP
   2025: { hex: '#22C55E', chip: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }, // DECODE

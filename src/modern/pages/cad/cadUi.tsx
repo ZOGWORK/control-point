@@ -8,14 +8,14 @@ import { BOM_GROUPS, BOM_GROUP_LABELS, CAD_TYPE_LABELS, type BomGroup, type CadT
 import type { BomSummary } from '../../../components/cad/useRobots';
 
 export const GROUP_BAR: Record<BomGroup, string> = {
-  review: 'bg-orange-400', buy: 'bg-sky-400', make: 'bg-[#ffc700]', hardware: 'bg-sky-400/45', ignore: 'bg-zinc-500/60',
+  review: 'bg-orange-400', buy: 'bg-sky-400', make: 'bg-[#c4a7e7]', hardware: 'bg-sky-400/45', ignore: 'bg-zinc-500/60',
 };
 export const GROUP_TEXT: Record<BomGroup, string> = {
-  review: 'text-orange-600 dark:text-orange-300', buy: 'text-sky-600 dark:text-sky-300', make: 'text-amber-700 dark:text-[#ffc700]',
+  review: 'text-orange-600 dark:text-orange-300', buy: 'text-sky-600 dark:text-sky-300', make: 'text-violet-700 dark:text-[#c4a7e7]',
   hardware: 'text-sky-700/80 dark:text-sky-200/80', ignore: 'text-muted-foreground',
 };
 const GROUP_CHIP: Record<BomGroup, string> = {
-  review: 'border-orange-400/40 bg-orange-400/10', buy: 'border-sky-400/40 bg-sky-400/10', make: 'border-[#ffc700]/40 bg-[#ffc700]/10',
+  review: 'border-orange-400/40 bg-orange-400/10', buy: 'border-sky-400/40 bg-sky-400/10', make: 'border-[#c4a7e7]/40 bg-[#c4a7e7]/10',
   hardware: 'border-sky-400/25 bg-sky-400/5', ignore: 'border-border bg-transparent',
 };
 const TYPE_GROUP: Record<CadType, BomGroup> = { buy: 'buy', print: 'make', cnc: 'make', 'cut-2d': 'make', fabricate: 'make', hardware: 'hardware', ignore: 'ignore', review: 'review' };

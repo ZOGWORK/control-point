@@ -23,7 +23,7 @@ export function TaskTagChips({ task, className }: { task: any; className?: strin
         </span>
       ))}
       {awards.map((a) => (
-        <span key={`a-${a.id}`} title={`${a.name}: ${a.criteria}`} className={cn(chip, 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300')}>
+        <span key={`a-${a.id}`} title={`${a.name}: ${a.criteria}`} className={cn(chip, 'border-[#c4a7e7]/40 bg-[#c4a7e7]/10 text-violet-700 dark:text-[#c4a7e7]')}>
           <Award className="size-3" aria-hidden />{a.name}<span className="sr-only"> award evidence</span>
         </span>
       ))}

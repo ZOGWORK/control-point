@@ -116,13 +116,13 @@ export function PrintsSidebar({ lib, folderId, filters, groupMode, queueMode, on
   return (
     <nav aria-label="Folders and groups" className="text-sm">
       <ul>
-        <Item active={queueMode} onClick={onQueue} icon={<ListOrdered className="size-4 shrink-0 text-[#b38b00] dark:text-[#ffc700]" />} label="Print queue"
+        <Item active={queueMode} onClick={onQueue} icon={<ListOrdered className="size-4 shrink-0 text-accent" />} label="Print queue"
           sub={overdue ? `${overdue} overdue` : undefined} count={queued.length} />
       </ul>
 
       <Heading>Folders</Heading>
       <ul>
-        <Item active={!groupMode && !queueMode && folderId === null} onClick={() => onFolder(null)} icon={<Library className="size-4 shrink-0 text-[#b38b00] dark:text-[#ffc700]" />}
+        <Item active={!groupMode && !queueMode && folderId === null} onClick={() => onFolder(null)} icon={<Library className="size-4 shrink-0 text-accent" />}
           label="All prints" count={lib.files.length} over={drop.over === 'folder:root'} drop={drop.target('folder:root', { folders: true, os: true })} />
         {(kids.get(null) ?? []).map((f) => folderItem(f, 1))}
       </ul>
@@ -178,7 +178,7 @@ export function PrintsSidebar({ lib, folderId, filters, groupMode, queueMode, on
         <ul>
           {lib.collections.map((c) => (
             <Item key={c.id} active={filters.collection === c.id} onClick={() => onToggle('collection', c.id)} label={c.name} count={countFor('collection', c.id)}
-              icon={<span className="ml-1 size-2 shrink-0 rotate-45 rounded-[2px] bg-[#ffc700]" aria-hidden />}
+              icon={<span className="ml-1 size-2 shrink-0 rotate-45 rounded-[2px] bg-accent" aria-hidden />}
               over={drop.over === `collection:${c.id}`} drop={lib.canEdit ? drop.target(`collection:${c.id}`) : undefined}
               menu={lib.canEdit ? (
                 <DropdownMenu>

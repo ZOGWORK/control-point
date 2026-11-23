@@ -32,8 +32,8 @@ export default function Walkthrough(props: WalkthroughProps) {
           to { opacity: 0; transform: translateY(10px) scale(0.98); }
         }
         @keyframes tour-spot-pulse {
-          0%, 100% { box-shadow: 0 0 16px 2px rgba(255,199,0,0.25); }
-          50% { box-shadow: 0 0 36px 8px rgba(255,199,0,0.55); }
+          0%, 100% { box-shadow: 0 0 16px 2px color-mix(in srgb, var(--color-accent) 25%, transparent); }
+          50% { box-shadow: 0 0 36px 8px color-mix(in srgb, var(--color-accent) 55%, transparent); }
         }
         .tour-card-in { animation: tour-card-in 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
         .tour-card-out { animation: tour-card-out 0.22s ease-in both; }
@@ -43,7 +43,7 @@ export default function Walkthrough(props: WalkthroughProps) {
         }
       `}</style>
 
-      {/* Spotlight: dim layer with animated cutout + volt glow ring (non-interactive) */}
+      {/* Spotlight: dim layer with animated cutout + accent ring (non-interactive) */}
       {ringGeom && (
         <>
           <div
@@ -63,7 +63,7 @@ export default function Walkthrough(props: WalkthroughProps) {
             style={{
               ...ringGeom,
               borderRadius: 18,
-              border: '2px solid #FFC700',
+              border: '2px solid var(--color-accent)',
               transition: ringTransition,
               opacity: showRing ? 1 : 0,
             }}

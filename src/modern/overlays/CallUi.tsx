@@ -25,9 +25,9 @@ import { useParticipantActions } from '../../components/voice/useParticipantActi
 import { ParticipantAudio, QualityBadge, StreamVideo, VoiceAvatar } from '../../components/voice/shared';
 
 const STATUS: Record<string, { label: string; dot: string }> = {
-  joining: { label: 'Connecting', dot: 'bg-amber-400' },
+  joining: { label: 'Connecting', dot: 'bg-info' },
   connected: { label: 'Connected', dot: 'bg-success' },
-  reconnecting: { label: 'Reconnecting', dot: 'bg-amber-400 animate-pulse' },
+  reconnecting: { label: 'Reconnecting', dot: 'bg-warning animate-pulse' },
   failed: { label: 'Connection failed', dot: 'bg-destructive' },
   ended: { label: 'Ended', dot: 'bg-muted-foreground' },
   idle: { label: 'Idle', dot: 'bg-muted-foreground' },
@@ -112,7 +112,7 @@ export function CallDock({ onOpenSettings }: { onOpenSettings?: () => void }) {
     >
       <div className={cn(
         'pointer-events-auto flex w-full max-w-2xl items-center gap-2 rounded-full border bg-popover/95 py-1.5 pl-4 pr-1.5 text-popover-foreground shadow-2xl backdrop-blur',
-        status === 'reconnecting' ? 'border-amber-400/50' : status === 'failed' ? 'border-destructive/50' : 'border-border',
+        status === 'reconnecting' ? 'border-warning/50' : status === 'failed' ? 'border-destructive/50' : 'border-border',
       )}>
         <button type="button" onClick={() => setExpanded(true)} className="min-w-0 flex-1 text-left" aria-label="Expand call view">
           <span className="block truncate text-sm font-medium">{session.name}</span>
@@ -157,8 +157,8 @@ export function IncomingCall() {
         </DialogDescription>
         {c.inAnotherCall ? (
           <>
-            <p role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-left text-sm">
-              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-500" />
+            <p role="alert" className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 p-3 text-left text-sm">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" />
               You're already in {c.session ? `“${c.session.name}”` : 'another call'}. Joining won't switch automatically; choose below.
             </p>
             <div className="grid grid-cols-2 gap-2">

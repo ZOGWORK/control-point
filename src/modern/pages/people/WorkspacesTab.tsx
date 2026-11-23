@@ -104,8 +104,8 @@ function TeamEditorDialog({ ctl }: { ctl: Ctl }) {
               <div className="grid gap-2">
                 <Label htmlFor="team-accent">Accent colour</Label>
                 <div className="flex items-center gap-2">
-                  <input type="color" aria-label="Pick accent colour" className="size-9 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" value={f.accent_color || '#FFC700'} onChange={(e) => set({ accent_color: e.target.value })} />
-                  <Input id="team-accent" value={f.accent_color} onChange={(e) => set({ accent_color: e.target.value })} placeholder="#FFC700" className="font-mono" />
+                  <input type="color" aria-label="Pick accent colour" className="size-9 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" value={f.accent_color || '#a3b6e0'} onChange={(e) => set({ accent_color: e.target.value })} />
+                  <Input id="team-accent" value={f.accent_color} onChange={(e) => set({ accent_color: e.target.value })} placeholder="#A3B6E0" className="font-mono" />
                 </div>
               </div>
             </>

@@ -32,7 +32,7 @@ import { PageViewsSection } from './PageViewsSection';
 type Ctl = ReturnType<typeof useOwnerConsole>;
 // Legacy status classes are tuned for dark; Modern badges get their own tones.
 const tone = (cls: string) => cls.includes('rose') ? 'border-rose-500/30 bg-rose-500/15 text-rose-600 dark:text-rose-300'
-  : cls.includes('amber') ? 'border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-300'
+  : cls.includes('warning') ? 'border-warning/30 bg-warning/15 text-warning'
     : cls.includes('orange') ? 'border-orange-500/30 bg-orange-500/15 text-orange-600 dark:text-orange-300'
       : cls.includes('sky') ? 'border-sky-500/30 bg-sky-500/15 text-sky-600 dark:text-sky-300'
         : cls.includes('emerald') ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
@@ -405,7 +405,7 @@ function UserRow({ u, ctl, extra }: { u: any; ctl: Ctl; extra?: React.ReactNode 
         <p className="flex flex-wrap items-center gap-1.5 truncate text-sm font-medium">
           {u.name}
           {u.flags_open > 0 && <Badge variant="destructive">{u.flags_open} flag{u.flags_open > 1 ? 's' : ''}</Badge>}
-          {u.warnings > 0 && <Badge variant="outline" className={tone('amber')}>{u.warnings} warn</Badge>}
+          {u.warnings > 0 && <Badge variant="outline" className={tone('warning')}>{u.warnings} warn</Badge>}
         </p>
         <p className="truncate text-xs text-muted-foreground">{u.email}{u.team_name ? ` · ${u.team_name}` : ''}{u.account_type ? ` · ${u.account_type}` : ''}{u.tokens_7d > 0 ? ` · ${fmtTokens(u.tokens_7d)} tokens / 7d` : ''}{u.last_ai_use ? ` · last AI ${when(u.last_ai_use, 'MMM d')}` : ''}</p>
       </div>
@@ -582,7 +582,7 @@ function FlagReview({ flag, ctl }: { flag: any; ctl: Ctl }) {
           <Input value={r.note} onChange={(e) => r.setNote(e.target.value)} placeholder="Note (optional — recorded with warn / timeout / disable)" aria-label="Reviewer note" disabled={r.busy} className="max-sm:h-11" />
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={r.busy} onClick={() => void r.run('dismiss')} className="max-sm:h-11">Dismiss</Button>
-            <Button variant="outline" size="sm" disabled={r.busy} onClick={() => void r.run('warn')} className="text-amber-600 dark:text-amber-400 max-sm:h-11"><AlertTriangle /> Warn</Button>
+            <Button variant="outline" size="sm" disabled={r.busy} onClick={() => void r.run('warn')} className="text-warning max-sm:h-11"><AlertTriangle /> Warn</Button>
             <Button variant="outline" size="sm" disabled={r.busy} onClick={() => void r.run('timeout', 24)} className="text-orange-600 dark:text-orange-400 max-sm:h-11"><Timer /> Timeout 24h</Button>
             <Button variant="outline" size="sm" disabled={r.busy} onClick={() => void r.run('disable')} className="text-destructive max-sm:h-11"><Ban /> Disable AI</Button>
           </div>
@@ -710,7 +710,7 @@ function UserSheet({ userId, teams, onClose, onChanged }: { userId: number; team
                   ))}
                   {m.timeoutUntil && <Button variant="ghost" size="sm" disabled={m.busy} onClick={() => void m.patchAi({ ai_timeout_until: null }, 'Timeout cleared')} className="max-sm:h-11">Clear timeout</Button>}
                 </div>
-                {m.timeoutUntil && <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"><Clock className="size-3" /> Paused until {format(m.timeoutUntil, 'MMM d, h:mm a')}</p>}
+                {m.timeoutUntil && <p className="mt-1.5 flex items-center gap-1 text-xs text-warning"><Clock className="size-3" /> Paused until {format(m.timeoutUntil, 'MMM d, h:mm a')}</p>}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <form className="grid gap-1.5" onSubmit={(e) => { e.preventDefault(); void m.saveDailyLimit(); }}>
@@ -729,10 +729,10 @@ function UserSheet({ userId, teams, onClose, onChanged }: { userId: number; team
               <h3 id="warn-h" className="text-sm font-semibold">Warn user</h3>
               <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void m.doWarn(); }}>
                 <Input value={m.warnNote} onChange={(e) => m.setWarnNote(e.target.value)} placeholder="Reason for the warning" aria-label="Warning reason" className="max-sm:h-11" />
-                <Button type="submit" variant="outline" disabled={m.busy} className="shrink-0 text-amber-600 dark:text-amber-400"><AlertTriangle /> Warn</Button>
+                <Button type="submit" variant="outline" disabled={m.busy} className="shrink-0 text-warning"><AlertTriangle /> Warn</Button>
               </form>
               {(m.data?.warnings || []).map((w: any) => (
-                <div key={w.id} className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs">
+                <div key={w.id} className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-xs">
                   <p>{w.note || 'Warning issued'}</p>
                   <p className="mt-0.5 text-muted-foreground">{w.created_at ? format(new Date(w.created_at), 'MMM d, yyyy h:mm a') : ''}</p>
                 </div>

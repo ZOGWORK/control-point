@@ -126,7 +126,7 @@ export default function MessageReactions({
               'flex items-center gap-1 pl-1.5 pr-2 py-0.5 rounded-full border text-xs font-semibold transition-all',
               'hover:scale-105 active:scale-95',
               r.reacted_by_me
-                ? 'bg-accent/20 border-accent/50 text-accent shadow-[0_0_8px_rgba(255,199,0,0.15)]'
+                ? 'bg-accent/20 border-accent/50 text-accent'
                 : 'bg-text-base/[0.06] border-text-base/15 text-text-base/80 hover:border-text-base/30 hover:bg-text-base/[0.1]'
             )}
           >
