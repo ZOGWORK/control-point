@@ -7,6 +7,7 @@ import { cn } from '../../../components/cn';
 import { Badge, Button, Input, Label } from '../../../components/ui-kit';
 import { apiFetch } from '../../../services/api';
 import { notify } from '../../../components/dialog';
+import { applyAccent, setAccentPreview } from '../../../utils/accent';
 import { PRESENCE_SETTINGS, PRESENCE_SETTING_META } from '../../../components/presence';
 import { getDraft, useDraft } from '../../drafts';
 import { MemberAvatar } from '../tasks/AssigneePicker';
@@ -33,11 +34,20 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
   // Live accent preview while editing; back to the saved accent otherwise.
   // An empty drafted accent means "team default" — exactly what Save sends.
   useEffect(() => {
-    const root = document.documentElement;
     const candidates = draft ? [form.accent, team?.accent_color] : [user.accent_color, team?.accent_color];
-    const apply = candidates.find(validHex)?.trim();
-    if (apply) root.style.setProperty('--color-accent', apply); else root.style.removeProperty('--color-accent');
+    // Colour and data-accent together, so primary buttons preview the fill too.
+    // While drafting, the preview is registered so App's colour effect (theme
+    // toggles, team loads…) keeps it instead of repainting the saved colour.
+    const shown = candidates.find(validHex)?.trim();
+    setAccentPreview(!!draft, shown);
+    applyAccent(shown);
     setColorVersion?.((v: number) => v + 1);
+    // Leaving the section (or the next preview) puts the saved colour back, so
+    // an unsaved draft never stays on the rest of the app.
+    return () => {
+      setAccentPreview(false);
+      applyAccent([user.accent_color, team?.accent_color].find(validHex)?.trim());
+    };
   }, [draft?.accent, user.accent_color, team?.accent_color]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
@@ -109,20 +119,24 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
       const res = await apiFetch('/api/theme/reset', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not reset theme');
-      // Apply the reset before dropping the draft, so the preview doesn't
-      // snap back to the old saved accent.
+      // A workspace manager's reset clears the team colour too: load the teams
+      // first, so App's colour effect never re-applies the old team colour from
+      // stale state. Then apply the reset before dropping the draft, so the
+      // preview doesn't snap back to the old saved accent.
+      // The reset already succeeded server-side: a failed reload must not turn
+      // it into an error (App re-syncs on the next successful team load).
+      try { await refresh?.teams?.(); } catch { /* keep going with the reset */ }
       onUserSaved?.(data.user ?? { ...user, accent_color: null });
-      refresh?.teams?.();
       // Only the colours were reset — keep any unsaved name/title edits.
       const cur = getDraft<ProfileDraft | null>(draftKey, null);
       if (cur) setDraft({ ...cur, accent: '' });
       const root = document.documentElement;
-      root.style.removeProperty('--color-accent');
+      applyAccent(data.user?.accent_color ?? null, root);
       root.style.removeProperty('--color-primary');
       root.style.removeProperty('--color-text-base');
       setColorVersion?.((v: number) => v + 1);
       refresh?.settings?.();
-      notify('Theme reset to the default Volt & Carbon colors.', 'success');
+      notify('Theme reset to the default colours.', 'success');
     } catch (e: any) {
       notify(e.message || 'Could not reset theme', 'error');
     }
@@ -214,7 +228,7 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
         <SettingsRow label="Roles">
           <span className="flex flex-wrap justify-end gap-1">{(user.roles || []).length ? user.roles.map((r: any) => <Badge key={r.id} variant="outline">{r.name}</Badge>) : <span className="text-sm text-muted-foreground">None</span>}</span>
         </SettingsRow>
-        <SettingsRow label="Colours" description="Clears custom colours and goes back to Volt & Carbon.">
+        <SettingsRow label="Colours" description="Clears custom colours and goes back to the default.">
           <Button variant="outline" size="sm" onClick={() => void resetTheme()}>Reset theme</Button>
         </SettingsRow>
       </SettingsGroup>

@@ -104,10 +104,11 @@ import DashboardView from './components/dashboard/DashboardView';
 import { useTranslation } from 'react-i18next';
 import { applyPulseOrigins, readPulseOrigins } from './utils/gridPulse';
 import { stripDescriptionImages } from './utils/taskImages';
+import { applyAccent, applySavedAccent } from './utils/accent';
 
 // Only accept real 6-digit hex colors. A junk string saved as a theme color
 // (e.g. "null", " ", "#") would make var(--color-accent) invalid and silently
-// strip the volt yellow from the whole UI, so invalid values fall back.
+// strip the accent from the whole UI, so invalid values fall back.
 function validHex(v: any): v is string {
   return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v.trim());
 }
@@ -137,6 +138,13 @@ function newSessionTag(): string {
 function forgetStoredSession() {
   noteSignIn(null);
   try { localStorage.removeItem(SESSION_TAG_KEY); localStorage.removeItem(LEGACY_SESSION_KEY); } catch { /* storage unavailable */ }
+  // Boot painted the cached team grid before the session check; with the
+  // session gone, signed-out pages get the default grid (the colour effect
+  // doesn't re-run here: none of its inputs change).
+  const root = document.documentElement;
+  root.style.removeProperty('--grid-rgb');
+  delete root.dataset.grid;
+  try { localStorage.removeItem(GRID_RGB_CACHE_KEY); } catch { /* storage unavailable */ }
 }
 /**
  * The boot-time session check, shared by every caller on this page load.
@@ -384,7 +392,7 @@ export default function App() {
     applyPulseOrigins(root, readPulseOrigins(get('controlpoint-grid-pulse-origins', 'center,edges,corners')));
     // Team branding grid colour cached for this session (refreshed once teams load).
     const cachedGridRgb = readCachedGridRgb();
-    if (cachedGridRgb) root.style.setProperty('--grid-rgb', cachedGridRgb);
+    if (cachedGridRgb) { root.style.setProperty('--grid-rgb', cachedGridRgb); root.dataset.grid = 'team'; }
     root.style.setProperty('--grid-glow-size', `${get('controlpoint-grid-glow-size', '280')}px`);
     root.style.setProperty('--grid-glow-opacity', get('controlpoint-grid-glow-opacity', '0.25'));
   }, []);
@@ -1016,31 +1024,34 @@ export default function App() {
   useEffect(() => {
     const applyColors = () => {
       const root = document.documentElement;
-      const clear = () => root.style.removeProperty('--color-accent');
+      // data-accent="team" tells the stylesheet a chosen colour is in effect:
+      // buttons fill with it, and the grid keeps its strength. Without it the
+      // accent is the default slate blue and buttons stay neutral (index.css).
+      const clear = () => applyAccent(null, root);
       if (isLoggedIn && currentUser) {
         const myTeam = teams.find(t => t.id === currentUser.team_id);
-        const accent = [currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim();
-        if (accent) root.style.setProperty('--color-accent', accent);
-        else clear();
+        applySavedAccent([currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim(), root);
         // Background grid + pulse follow the team branding (admin-set on
         // Teams & Members), not a member's personal accent.
         // Only act once we actually know the team's colour: the team row
         // is loaded, or the account is genuinely teamless (team_id null →
-        // volt). teamsLoaded alone isn't enough — it's also set when the
+        // the default ink grid). teamsLoaded alone isn't enough — it's also set when the
         // /api/teams fetch fails, and that must not wipe the cached colour.
         if (teamsLoaded && (myTeam || !currentUser.team_id)) {
           const gridRgb = validHex(myTeam?.accent_color) ? hexToRgbTriplet(myTeam!.accent_color.trim()) : null;
-          if (gridRgb) root.style.setProperty('--grid-rgb', gridRgb);
-          else root.style.removeProperty('--grid-rgb');
+          // data-grid="team": the grid is in the team's colour, at full strength.
+          if (gridRgb) { root.style.setProperty('--grid-rgb', gridRgb); root.dataset.grid = 'team'; }
+          else { root.style.removeProperty('--grid-rgb'); delete root.dataset.grid; }
           writeCachedGridRgb(gridRgb);
         }
       } else {
         clear();
         // On boot this branch runs before the session check, so keep the
         // session-scoped cached colour; once the session is really gone
-        // (logout / expiry), drop it so the next account starts on volt.
+        // (logout / expiry), drop it so the next account starts on the default.
         if (!readStoredSessionId()) {
           root.style.removeProperty('--grid-rgb');
+          delete root.dataset.grid;
           writeCachedGridRgb(null);
         }
       }

@@ -79,54 +79,64 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* team-accent: styles for when a workspace or member picked their own colour
+   (App.tsx sets html[data-accent="team"]). Without it the accent is the
+   default slate blue, which never fills a button. */
+@custom-variant team-accent (&:where(html[data-accent="team"], html[data-accent="team"] *));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Space Grotesk", sans-serif;
   --font-serif: "Instrument Serif", Georgia, serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  /* Volt & Carbon — Control Point theme */
-  --color-primary: #09090b;      /* carbon black — page background */
-  --color-secondary: #121215;    /* raised surface */
-  --color-elevated: #1a1a1f;     /* cards, popovers */
-  --color-accent: #ffc700;       /* volt yellow — primary actions */
-  --color-accent-hover: #ffd633; /* volt hover */
-  --color-accent-ink: #231a00;   /* text on volt */
-  --color-accent-soft: #ffc7001f;/* volt tint fills */
-  /* The accent as small text (link buttons): the accent itself on dark. On light, volt #eab308 reads 1.9:1
-     on white, so html.light darkens whatever the accent is (a team's own colour too) toward black. */
+  /* Graphite & slate — Control Point theme, shared with Control Scout v8
+     (control-scout docs/design/control-point-v8-brief.md §3.2). Slate blue is
+     only the default accent: a workspace or member that picked a colour gets
+     it instead (App.tsx sets it inline and marks html[data-accent="team"]). */
+  --color-primary: #0a0a0b;      /* graphite — page background */
+  --color-secondary: #0e0e10;    /* surface-1: sidebar, cards */
+  --color-elevated: #141416;     /* surface-2: menus, popovers */
+  --color-accent: #a3b6e0;       /* slate blue — the wash's light end */
+  --color-accent-hover: #b6c6e8;
+  --color-accent-ink: #141a2b;   /* text on an accent fill */
+  --color-accent-soft: #a3b6e01f;/* selected-row tint */
+  /* The accent as small text (link buttons): the accent itself on dark. On light, a team's own colour
+     is darkened toward black so it holds on white (html.light[data-accent="team"]). */
   --color-accent-text: var(--color-accent);
+  --color-ink: #ffffff;          /* neutral fills and hairlines: bg-ink/10, border-ink/12 */
+  --color-text-faint: #71717a;   /* captions, units */
   --color-line: #ffffff14;       /* hairline borders */
-  --color-info: #38bdf8;
+  --color-info: #7dd3fc;
   --color-success: #34d399;
-  --color-warning: #fb923c;
-  --color-text-base: #fafaf8;
+  --color-warning: #f5a35c;
+  --color-text-base: #f4f4f5;
   --color-text-muted: #a1a1aa;
 
   /* shadcn/ui semantic tokens (used by the Modern experience). Names that
      collide with ours (primary/secondary/accent) are intentionally absent:
      Modern uses bg-accent for shadcn's "primary". Values are set per theme
      in src/modern/modern.css. */
-  --color-background: var(--sh-background, #09090b);
-  --color-foreground: var(--sh-foreground, #fafaf8);
-  --color-card: var(--sh-card, #121215);
-  --color-card-foreground: var(--sh-card-foreground, #fafaf8);
-  --color-popover: var(--sh-popover, #18181b);
-  --color-popover-foreground: var(--sh-popover-foreground, #fafaf8);
-  --color-muted: var(--sh-muted, #18181b);
+  --color-background: var(--sh-background, #0a0a0b);
+  --color-foreground: var(--sh-foreground, #f4f4f5);
+  --color-card: var(--sh-card, #0e0e10);
+  --color-card-foreground: var(--sh-card-foreground, #f4f4f5);
+  --color-popover: var(--sh-popover, #141416);
+  --color-popover-foreground: var(--sh-popover-foreground, #f4f4f5);
+  --color-muted: var(--sh-muted, #1b1b1e);
   --color-muted-foreground: var(--sh-muted-foreground, #a1a1aa);
   --color-border: var(--sh-border, #ffffff14);
   --color-input: var(--sh-input, #ffffff1f);
-  --color-ring: var(--sh-ring, #ffc700);
+  --color-ring: var(--sh-ring, #a3b6e0);
   --color-destructive: var(--sh-destructive, #f43f5e);
   /* Destructive as small text (menu items), on white or its own 10% focus tint: the token itself on dark;
      html.light deepens it to rose 700, since rose 600 drops to 4.1:1 on the focus tint. */
   --color-destructive-text: var(--color-destructive);
-  --color-chart-1: var(--sh-chart-1, #ffc700);
+  --color-chart-1: var(--sh-chart-1, #a3b6e0);
   --color-chart-2: var(--sh-chart-2, #38bdf8);
   --color-chart-3: var(--sh-chart-3, #34d399);
-  --color-chart-4: var(--sh-chart-4, #a78bfa);
-  --color-chart-5: var(--sh-chart-5, #fb923c);
+  --color-chart-4: var(--sh-chart-4, #c4a7e7);
+  --color-chart-5: var(--sh-chart-5, #f5a35c);
 }
 
 @layer base {
@@ -176,11 +186,11 @@
 }
 
 .gold-glow {
-  box-shadow: 0 0 24px rgba(255, 199, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--color-accent) 28%, transparent), 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .volt-text-glow {
-  text-shadow: 0 0 32px rgba(255, 199, 0, 0.45);
+  text-shadow: 0 0 32px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
 /* ---------- landing helpers ---------- */
@@ -193,7 +203,7 @@
 }
 
 .hero-glow {
-  background: radial-gradient(ellipse 60% 45% at 50% 0%, rgba(255, 199, 0, 0.16), transparent 70%);
+  background: radial-gradient(ellipse 60% 45% at 50% 0%, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent 70%);
 }
 
 /* ---------- reactive hero (mouse-driven) ---------- */
@@ -213,8 +223,8 @@
    lit patch feels raised off the page. */
 .hero-grid-spot {
   background-image:
-    linear-gradient(rgba(255, 199, 0, 0.4) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 199, 0, 0.4) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--color-accent) 40%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 40%, transparent) 1px, transparent 1px);
   background-size: 56px 56px;
   -webkit-mask-image: radial-gradient(300px circle at var(--mx) var(--my), black 15%, transparent 68%);
   mask-image: radial-gradient(300px circle at var(--mx) var(--my), black 15%, transparent 68%);
@@ -227,7 +237,7 @@
 
 /* Soft volt aura that trails the cursor. */
 .hero-mouse-glow {
-  background: radial-gradient(440px circle at var(--mx) var(--my), rgba(255, 199, 0, 0.13), transparent 65%);
+  background: radial-gradient(440px circle at var(--mx) var(--my), color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 65%);
   opacity: 0;
   transition: opacity 0.45s ease;
   pointer-events: none;
@@ -264,9 +274,9 @@
   @apply relative overflow-hidden rounded-3xl border border-white/10 bg-secondary/60 p-7 transition-all duration-300;
 }
 .feature-card:hover {
-  border-color: rgba(255, 199, 0, 0.35);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
   transform: translateY(-4px);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 199, 0, 0.12);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 0 1px color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 /* ---------- light mode ---------- */
@@ -279,21 +289,32 @@
 html.light {
   color-scheme: light;
 
-  --color-primary: #fafaf9;       /* warm off-white page — softer than pure white */
+  --color-primary: #fafafa;       /* page */
   --color-secondary: #f4f4f5;    /* zinc-100 — sidebar, wells */
   --color-elevated: #ffffff;     /* cards, popovers — true white for contrast */
-  --color-accent: #eab308;       /* volt, deepened a notch so it holds on white */
-  --color-accent-hover: #ca8a04;
-  --color-accent-ink: #231a00;   /* text on volt */
-  --color-accent-soft: #eab3081f;/* volt tint fills */
-  --color-accent-text: color-mix(in srgb, var(--color-accent) 55%, black); /* volt: #816204, 5.7:1 on white */
+  --color-accent: #3f5a96;       /* slate blue, deepened for white (Control Scout v8 Light) */
+  --color-accent-hover: #34497a;
+  --color-accent-ink: #231a00;   /* text on a team's own accent fill (most picks are light) */
+  --color-accent-soft: #3f5a961f;
+  /* Small accent text: the default slate is 6.9:1 on white as is; a team's own colour is darkened (below). */
+  --color-accent-text: var(--color-accent);
+  --color-ink: #18181b;
+  --color-text-faint: #71717a;
   --color-destructive-text: #be123c; /* rose 700: 6.6:1 on white, 5.4:1 on the rose focus tint */
   --color-line: #09090b14;       /* hairline borders */
   --color-info: #0284c7;
-  --color-success: #059669;
-  --color-warning: #ea580c;
+  --color-success: #047857;
+  --color-warning: #c2410c;
   --color-text-base: #18181b;
   --color-text-muted: #52525b;
+}
+/* The default slate is dark enough on white for white text on its fill. */
+html.light:not([data-accent="team"]) {
+  --color-accent-ink: #ffffff;
+}
+/* A team's own colour as small text on white: darkened toward black so it holds. */
+html.light[data-accent="team"] {
+  --color-accent-text: color-mix(in srgb, var(--color-accent) 55%, black);
 }
 
 /* Subtle grid texture on the page background in light mode — echoes the
@@ -324,12 +345,18 @@ html.light main.bg-primary {
   --grid-pulse-speed: 6s;
   --grid-glow-size: 280px;
   --grid-glow-opacity: 0.25;
-  /* Grid / pulse / cursor-glow colour. Volt by default; App.tsx overrides it
-     inline with the team's branding colour (Teams & Members). */
-  --grid-rgb: 255 199 0;
+  /* Grid / pulse / cursor-glow colour. Ink (quiet white) by default; App.tsx
+     overrides it inline with the team's branding colour (Teams & Members). */
+  --grid-rgb: 255 255 255;
 }
 html.light {
-  --grid-rgb: 202 138 4;
+  --grid-rgb: 24 24 27;
+}
+/* Without a team colour the grid is ink, which reads stronger than a colour
+   at the same alpha, so it is scaled down (the opacities themselves are the
+   person's own settings, written inline by App.tsx). */
+html:not([data-grid="team"]) {
+  --grid-ink-k: 0.4;
 }
 .app-volt-grid {
   position: relative;
@@ -344,15 +371,15 @@ html.grid-off .app-volt-grid .grid-reactive-spot {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgb(var(--grid-rgb) / var(--grid-opacity)) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--grid-rgb) / var(--grid-opacity)) 1px, transparent 1px);
+    linear-gradient(rgb(var(--grid-rgb) / calc(var(--grid-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--grid-rgb) / calc(var(--grid-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px);
   background-size: var(--grid-size) var(--grid-size);
   z-index: 0;
 }
 html.light .app-volt-grid::before {
   background-image:
-    linear-gradient(rgb(var(--grid-rgb) / var(--grid-opacity)) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--grid-rgb) / var(--grid-opacity)) 1px, transparent 1px);
+    linear-gradient(rgb(var(--grid-rgb) / calc(var(--grid-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--grid-rgb) / calc(var(--grid-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px);
 }
 /* Pulsing glow across the grid — disable via Settings → Appearance.
    Three layers (centre, edge midpoints, corners) rendered inside <main> in
@@ -362,7 +389,7 @@ html.light .app-volt-grid::before {
    hides layers via html.pulse-off-<origin>. */
 .app-volt-grid {
   --pulse-rgb: var(--grid-rgb);
-  --pulse-max: var(--grid-pulse-opacity);
+  --pulse-max: calc(var(--grid-pulse-opacity) * var(--grid-ink-k, 1));
 }
 html.light .app-volt-grid {
   --pulse-max: 0.06;
@@ -409,8 +436,8 @@ html.pulse-off-corners .app-volt-grid .grid-pulse-corners {
   pointer-events: none;
   z-index: 0;
   background-image:
-    linear-gradient(rgb(var(--grid-rgb) / var(--grid-glow-opacity)) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--grid-rgb) / var(--grid-glow-opacity)) 1px, transparent 1px);
+    linear-gradient(rgb(var(--grid-rgb) / calc(var(--grid-glow-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--grid-rgb) / calc(var(--grid-glow-opacity) * var(--grid-ink-k, 1))) 1px, transparent 1px);
   background-size: var(--grid-size) var(--grid-size);
   -webkit-mask-image: radial-gradient(var(--grid-glow-size) circle at var(--mx, 50%) var(--my, 50%), black 10%, transparent 65%);
   mask-image: radial-gradient(var(--grid-glow-size) circle at var(--mx, 50%) var(--my, 50%), black 10%, transparent 65%);
@@ -469,20 +496,21 @@ html.light :is(.bg-rose-600, .bg-rose-500, .bg-red-600, .bg-red-500) {
    over :root by source order. */
 .theme-dark,
 html.light .theme-dark {
-  --color-primary: #09090b;
-  --color-secondary: #121215;
-  --color-elevated: #1a1a1f;
-  --color-accent: #ffc700;
-  --color-accent-hover: #ffd633;
-  --color-accent-ink: #231a00;
-  --color-accent-soft: #ffc7001f;
-  --color-accent-text: #ffc700;
+  --color-primary: #0a0a0b;
+  --color-secondary: #0e0e10;
+  --color-elevated: #141416;
+  --color-accent: #a3b6e0;
+  --color-accent-hover: #b6c6e8;
+  --color-accent-ink: #141a2b;
+  --color-accent-soft: #a3b6e01f;
+  --color-accent-text: #a3b6e0;
+  --color-ink: #ffffff;
   --color-destructive-text: var(--color-destructive);
   --color-line: #ffffff14;
-  --color-info: #38bdf8;
+  --color-info: #7dd3fc;
   --color-success: #34d399;
-  --color-warning: #fb923c;
-  --color-text-base: #fafaf8;
+  --color-warning: #f5a35c;
+  --color-text-base: #f4f4f5;
   --color-text-muted: #a1a1aa;
 }
 html.light .theme-dark .card-surface {
@@ -578,7 +606,7 @@ html.light .theme-dark .card-surface {
 .cp-refresh-bar {
   width: 25%;
   animation: cp-refresh-slide 1.1s ease-in-out infinite;
-  box-shadow: 0 0 12px rgba(255, 199, 0, 0.8);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 @media (prefers-reduced-motion: reduce) {
   .cp-refresh-bar { animation: none; width: 100%; }
