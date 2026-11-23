@@ -33,6 +33,21 @@ describe('ProfileSection accent', () => {
     expect(root.dataset.accent).toBeUndefined();
   });
 
+  it('keeps previewing the draft after a theme toggle re-applies the saved colour', () => {
+    setDraft('settings:profile:7', { name: 'Dev', role: 'Admin', accent: '#22c55e' });
+    // App's own listener, added before the section mounts, re-applies the saved (default) colour.
+    const appReapply = () => { root.style.removeProperty('--color-accent'); delete root.dataset.accent; };
+    window.addEventListener('cp-theme-change', appReapply);
+    try {
+      render(<ProfileSection currentUser={user} teams={[{ id: 1, accent_color: null }]} />);
+      window.dispatchEvent(new Event('cp-theme-change'));
+      expect(root.style.getPropertyValue('--color-accent')).toBe('#22c55e');
+      expect(root.dataset.accent).toBe('team');
+    } finally {
+      window.removeEventListener('cp-theme-change', appReapply);
+    }
+  });
+
   it('keeps the team colour after closing when the member has none', () => {
     setDraft('settings:profile:7', { name: 'Dev', role: 'Admin', accent: '#22c55e' });
     const view = render(<ProfileSection currentUser={user} teams={[{ id: 1, accent_color: '#38bdf8' }]} />);

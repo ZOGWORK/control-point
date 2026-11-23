@@ -36,11 +36,18 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
   useEffect(() => {
     const candidates = draft ? [form.accent, team?.accent_color] : [user.accent_color, team?.accent_color];
     // Colour and data-accent together, so primary buttons preview the fill too.
-    applyAccent(candidates.find(validHex)?.trim());
+    const preview = () => applyAccent(candidates.find(validHex)?.trim());
+    preview();
     setColorVersion?.((v: number) => v + 1);
+    // A theme toggle makes App re-apply the saved colour (its cp-theme-change
+    // listener was added first, so it runs first); put the preview back after it.
+    window.addEventListener('cp-theme-change', preview);
     // Leaving the section (or the next preview) puts the saved colour back, so
     // an unsaved draft never stays on the rest of the app.
-    return () => applyAccent([user.accent_color, team?.accent_color].find(validHex)?.trim());
+    return () => {
+      window.removeEventListener('cp-theme-change', preview);
+      applyAccent([user.accent_color, team?.accent_color].find(validHex)?.trim());
+    };
   }, [draft?.accent, user.accent_color, team?.accent_color]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
