@@ -1,7 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="20" fill="#09090b"/>
-  <g fill="none" stroke="#ffc700" stroke-width="7" stroke-linejoin="round">
-    <polygon points="50,12 82,31 82,69 50,88 18,69 18,31"/>
-    <polygon points="50,32 66,41 66,59 50,68 34,59 34,41" stroke-width="6"/>
+  <!-- The Control Point mark (scripts/make-icons.py): the round C with a control point in its opening,
+       soft white on the near-black tile, with a simple wash (slate blue to mauve) across the top. -->
+  <defs>
+    <linearGradient id="cp-wash" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#44587f"/>
+      <stop offset="0.52" stop-color="#4a4462"/>
+      <stop offset="1" stop-color="#6e5076"/>
+    </linearGradient>
+    <linearGradient id="cp-fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0a0b" stop-opacity="0.15"/>
+      <stop offset="0.7" stop-color="#0a0a0b" stop-opacity="1"/>
+    </linearGradient>
+    <linearGradient id="cp-ink" x1="0" y1="18" x2="0" y2="82" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dcd9e8"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" fill="url(#cp-wash)"/>
+  <rect width="100" height="100" fill="url(#cp-fade)"/>
+  <g fill="url(#cp-ink)">
+    <path d="M65.29 26.77A29.47 29.47 0 1 0 75.74 58.57L63.69 51.38A15.3 15.3 0 1 1 53.09 35.35Z"/>
+    <circle cx="68.42" cy="38.76" r="7.34"/>
   </g>
 </svg>
