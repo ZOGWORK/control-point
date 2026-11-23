@@ -3,14 +3,13 @@
 Needs Pillow and numpy. The output is deterministic (the grain uses a seeded RNG),
 so a re-run with no code change leaves every file byte-identical.
 
-The icon is a sibling of Control Scout's v8 icon (control-scout scripts/brand-icon.mjs):
+The tile is a sibling of Control Scout's v8 icon (control-scout scripts/brand-icon.mjs):
 the same near-black tile with the same wash of three glows along the top edge, the
-same fine grain, and the same heavy round "C" in soft white with a soft shadow. Only
-the glyph in the C's opening differs: Scout has a compass needle, Control Point has
-a control point, a solid round node.
+same fine grain, and the mark in the same soft white with a soft shadow. The mark is
+Control Point's own: a faceted C, all sharp corners, with the control point (a diamond)
+inside it, so it does not read as Scout's round C with its needle.
 
-Geometry is in units of the tile's width, measured from Scout's mark master
-(brand/favicon-master-white.png, 1254 px) so the two C's match.
+Geometry is in units of 1/1254 of the tile's width (the master's size).
 
 Writes:
   favicon.png            64   full-bleed tile (browser tab)
@@ -40,56 +39,42 @@ GRAIN = 0.07
 MASTER = 1254  # the master's size, as Scout's, so the grain has the same scale
 SEED = 8
 
-# The C (Scout's): an outer circle, an inner circle a little right of it, and a wedge cut
-# out of the right side between two straight edges. Units: fraction of the tile.
+# The mark: a faceted C (an octagon with a stroke cut out, opened on the right by a wedge
+# from the centre) with the control point, a diamond, in the middle. Sharp corners
+# throughout, so it reads apart from Scout's round C. Units: 1/1254 of the tile.
 U = 1 / 1254
-C_OUTER = (595.2 * U, 630.0 * U, 369.6 * U)  # cx, cy, r
-C_INNER = (607.6 * U, 626.2 * U, 191.9 * U)
-CUT_TOP = ((841 * U, 320 * U), -0.704)  # a point on the edge, slope dy/dx
-CUT_BOTTOM = ((825 * U, 660 * U), 0.597)
-# The control point: a solid node in the opening, where Scout's needle sits.
-NODE = (858 * U, 486 * U, 92 * U)  # cx, cy, r
-
-GLYPH = "node"
+CX = CY = 627
+OUTER = (345, 150)  # half-size, corner chamfer
+INNER = (170, 78)
+MOUTH = 330  # the wedge's half-height at the tile's right edge
+POINT = (617, 627, 105)  # diamond centre x, y, half-diagonal
 
 
-def mark_mask(size: int, glyph: str = GLYPH, scale: float = 1.0, ss: int = 4) -> np.ndarray:
+def octagon(h: float, k: float) -> list[tuple[float, float]]:
+    c = CX
+    return [(c - h + k, c - h), (c + h - k, c - h), (c + h, c - h + k), (c + h, c + h - k),
+            (c + h - k, c + h), (c - h + k, c + h), (c - h, c + h - k), (c - h, c - h + k)]
+
+
+def mark_polys() -> list[tuple[list[tuple[float, float]], int]]:
+    """The mark as polygons in tile units (0..1254), painted in order: 255 adds, 0 cuts."""
+    px, py, pr = POINT
+    return [
+        (octagon(*OUTER), 255),
+        (octagon(*INNER), 0),
+        ([(CX, CY), (1254, CY - MOUTH), (1254, CY + MOUTH)], 0),
+        ([(px, py - pr), (px + pr, py), (px, py + pr), (px - pr, py)], 255),
+    ]
+
+
+def mark_mask(size: int, scale: float = 1.0, ss: int = 4) -> np.ndarray:
     """The mark's coverage (0..1) on a size x size tile, drawn at ss x and box-filtered down."""
     S = size * ss
     im = Image.new("L", (S, S), 0)
     d = ImageDraw.Draw(im)
     o = (1 - scale) / 2
-
-    def p(x: float, y: float) -> tuple[float, float]:
-        return ((o + x * scale) * S, (o + y * scale) * S)
-
-    def disc(cx: float, cy: float, r: float, fill: int) -> None:
-        (x0, y0), (x1, y1) = p(cx - r, cy - r), p(cx + r, cy + r)
-        d.ellipse([x0, y0, x1, y1], fill=fill)
-
-    disc(*C_OUTER, 255)
-    disc(*C_INNER, 0)
-    # The opening: everything below the top edge and above the bottom edge, right of where they meet.
-    (tx, ty), ts = CUT_TOP
-    (bx, by), bs = CUT_BOTTOM
-    ax = (by - ty + ts * tx - bs * bx) / (ts - bs)
-    ay = ty + ts * (ax - tx)
-    far = 3.0
-    wedge = [p(ax, ay), p(ax + far, ay + ts * far), p(ax + far, ay + bs * far)]
-    d.polygon(wedge, fill=0)
-    if glyph == "node":
-        disc(*NODE, 255)
-    elif glyph == "target":
-        cx, cy, _ = NODE
-        disc(cx, cy, 104 * U, 255)
-        disc(cx, cy, 66 * U, 0)
-        disc(cx, cy, 34 * U, 255)
-    elif glyph == "centre":
-        disc(C_INNER[0], C_INNER[1], 82 * U, 255)
-    elif glyph == "needle":  # Scout's own glyph, for checking the C against Scout's icon
-        d.polygon([p(737 * U, 465 * U), p(1048 * U, 227 * U), p(880 * U, 612 * U)], fill=255)
-    elif glyph != "none":
-        raise ValueError(glyph)
+    for pts, fill in mark_polys():
+        d.polygon([((o + x * U * scale) * S, (o + y * U * scale) * S) for x, y in pts], fill=fill)
     im = im.resize((size, size), Image.BOX)
     return np.asarray(im, dtype=np.float32) / 255
 
@@ -119,7 +104,7 @@ def over(dst: np.ndarray, rgb: np.ndarray, alpha: np.ndarray) -> np.ndarray:
     return dst * (1 - a) + rgb * a
 
 
-def tile(size: int, glyph: str = GLYPH, scale: float = 1.0) -> Image.Image:
+def tile(size: int, scale: float = 1.0) -> Image.Image:
     """The full icon at `size`, drawn as Scout draws its master."""
     N = size
     yy, xx = np.mgrid[0:N, 0:N].astype(np.float32) + 0.5
@@ -147,7 +132,7 @@ def tile(size: int, glyph: str = GLYPH, scale: float = 1.0) -> Image.Image:
     img = img * (1 - GRAIN) + ov * GRAIN
     # The mark: soft white (white at 18% to a faint lavender grey at 82%), with a soft
     # shadow (black 35%, blur 3% of the size, 1% down).
-    m = mark_mask(N, glyph, scale)
+    m = mark_mask(N, scale)
     shadow = blur(m, N * 0.03 / 2)
     dy = int(round(N * 0.01))
     shadow = np.vstack([np.zeros((dy, N), np.float32), shadow[: N - dy]]) * 0.35

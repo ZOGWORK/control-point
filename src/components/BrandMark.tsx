@@ -4,10 +4,10 @@ import { cn } from './ui';
 /**
  * BrandMark — the Control Point logo slot.
  *
- * The logo is `public/logo.png` (Control Scout's v8 icon family: a round "C"
- * with a control point in its opening, soft white on the near-black tile with
- * the slate-to-mauve wash; drawn by scripts/make-icons.py). If it fails to
- * load, the same mark renders inline as SVG.
+ * The logo is `public/logo.png` (Control Scout's v8 icon family: a faceted,
+ * sharp-cornered "C" with the control point, a diamond, inside it; soft white on
+ * the near-black tile with the slate-to-mauve wash; drawn by scripts/make-icons.py).
+ * If it fails to load, the same mark renders inline as SVG.
  *
  * Includes the mini BETA badge next to the wordmark (intentionally tiny).
  */
@@ -28,9 +28,12 @@ export function BetaBadge({ className }: { className?: string }) {
   );
 }
 
-/** The mark alone (the C and its control point) filling its box, in the icon's soft-white ink. Path from scripts/make-icons.py. */
+/** The mark alone (the faceted C and its diamond point) filling its box, in the icon's soft-white ink.
+ *  Polygons from scripts/make-icons.py (mark_polys), scaled to the 100-unit box: the C is the outer
+ *  octagon with the inner octagon and the right-hand wedge masked out. */
 function MarkSvg() {
-  const ink = `cp-ink-${useId().replace(/:/g, '')}`;
+  const id = useId().replace(/:/g, '');
+  const ink = `cp-ink-${id}`, cut = `cp-cut-${id}`;
   return (
     <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden="true" focusable="false">
       <defs>
@@ -38,10 +41,15 @@ function MarkSvg() {
           <stop offset="0" stopColor="#ffffff" />
           <stop offset="1" stopColor="#dcd9e8" />
         </linearGradient>
+        <mask id={cut} maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+          <polygon points="34.45,22.49 65.55,22.49 77.51,34.45 77.51,65.55 65.55,77.51 34.45,77.51 22.49,65.55 22.49,34.45" fill="#fff" />
+          <polygon points="42.66,36.44 57.34,36.44 63.56,42.66 63.56,57.34 57.34,63.56 42.66,63.56 36.44,57.34 36.44,42.66" fill="#000" />
+          <polygon points="50,50 100,23.68 100,76.32" fill="#000" />
+        </mask>
       </defs>
       <g fill={`url(#${ink})`}>
-        <path d="M65.29 26.77A29.47 29.47 0 1 0 75.74 58.57L63.69 51.38A15.3 15.3 0 1 1 53.09 35.35Z" />
-        <circle cx="68.42" cy="38.76" r="7.34" />
+        <rect width="100" height="100" mask={`url(#${cut})`} />
+        <polygon points="49.2,41.63 57.58,50 49.2,58.37 40.83,50" />
       </g>
     </svg>
   );
@@ -68,7 +76,7 @@ function LogoImage({ className, decorative = false }: { className?: string; deco
   }
   return (
     <img
-      src="/logo.png?v=5"
+      src="/logo.png?v=6"
       alt={decorative ? '' : 'Control Point logo'}
       onError={() => setMissing(true)}
       className={cn('object-contain flex-shrink-0', className)}
