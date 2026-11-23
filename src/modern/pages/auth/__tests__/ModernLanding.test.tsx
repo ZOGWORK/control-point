@@ -75,10 +75,28 @@ describe('ModernLanding (v8)', () => {
     expect(wash.querySelectorAll('.landing-wash-glow')).toHaveLength(3);
   });
 
-  it('uses no yellow, gradient text or hex colours in the page source', () => {
-    const src = ['../ModernLanding.tsx', '../landing/FeatureRows.tsx']
-      .map((f) => readFileSync(resolve(__dirname, f), 'utf8')).join('\n');
-    expect(src).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(src).not.toMatch(/yellow|volt|amber|bg-clip-text|teal|mint/i);
+  it("falls back to the other theme's screenshot when one fails, and drops the frame when both do", () => {
+    setup();
+    const f = FEATURES[0];
+    const [dark, light] = screen.getAllByAltText(f.alt);
+    fireEvent.error(dark);
+    expect(dark).toHaveAttribute('src', `/landing/${f.shot}-light.webp`);
+    expect(screen.getByTestId(`shot-${f.shot}`)).toBeInTheDocument();
+    fireEvent.error(light);
+    expect(screen.queryByTestId(`shot-${f.shot}`)).not.toBeInTheDocument();
+    // The other rows are untouched.
+    expect(screen.getByTestId(`shot-${FEATURES[1].shot}`)).toBeInTheDocument();
+  });
+
+  it('uses no yellow or gradient text anywhere on the page, and hex colours only for the wash', () => {
+    const read = (f: string) => readFileSync(resolve(__dirname, f), 'utf8');
+    const files = ['../ModernLanding.tsx', '../landing/FeatureRows.tsx', '../landing/LandingWash.tsx', '../landing/landing.css'];
+    const all = files.map(read).join(' ');
+    expect(all).not.toMatch(/yellow|volt|amber|gold|bg-clip-text|teal|mint/i);
+    // The page and rows use tokens only.
+    expect(read('../ModernLanding.tsx') + read('../landing/FeatureRows.tsx')).not.toMatch(/#[0-9a-f]{3,8}(?![0-9a-z])/i);
+    // The wash's own colours (Control Scout's three) and its black fade mask are the only hex values.
+    const hex = new Set((read('../landing/LandingWash.tsx') + read('../landing/landing.css')).match(/#[0-9a-f]{3,8}(?![0-9a-z])/gi)?.map((h) => h.toLowerCase()));
+    expect([...hex].sort()).toEqual(['#000', '#5a76ad', '#5f5785', '#91689c']);
   });
 });

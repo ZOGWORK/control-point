@@ -1,6 +1,6 @@
 // The landing's feature rows: a short heading and a line or two of copy beside a real
 // screenshot of that page (captured from a seeded demo workspace, Dark and Light).
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { cn } from '../../../../components/cn';
 
@@ -60,28 +60,22 @@ export const FEATURES: Feature[] = [
 ];
 
 /** A product screenshot in a hairline frame. Both themes ship; the page's theme picks one.
- *  On phones the frame shows the top-left of the page at a readable size instead of the whole page shrunk. */
+ *  On phones the frame shows the top-left of the page at a readable size instead of the whole page shrunk.
+ *  If a theme's file fails to load, that theme shows the other theme's shot; if both fail, the frame goes. */
 export function ProductShot({ shot, h, alt, className }: { shot: string; h: number; alt: string; className?: string }) {
+  const [broken, setBroken] = useState({ dark: false, light: false });
+  if (broken.dark && broken.light) return null;
+  const src = (theme: 'dark' | 'light') => {
+    const other = theme === 'dark' ? 'light' : 'dark';
+    return `/landing/${shot}-${broken[theme] ? other : theme}.webp`;
+  };
+  // A failure on the fallback means the other file is broken too.
+  const fail = (theme: 'dark' | 'light') => () => setBroken((b) => (b[theme] ? { dark: true, light: true } : { ...b, [theme]: true }));
+  const img = 'h-auto w-full max-sm:w-[170%] max-sm:max-w-none';
   return (
-    <div className={cn('overflow-hidden rounded-[14px] border border-border bg-card max-sm:aspect-[5/4]', className)}>
-      <img
-        src={`/landing/${shot}-dark.webp`}
-        alt={alt}
-        width={1600}
-        height={h}
-        loading="lazy"
-        decoding="async"
-        className="block h-auto w-full max-sm:w-[170%] max-sm:max-w-none [html.light_&]:hidden"
-      />
-      <img
-        src={`/landing/${shot}-light.webp`}
-        alt={alt}
-        width={1600}
-        height={h}
-        loading="lazy"
-        decoding="async"
-        className="hidden h-auto w-full max-sm:w-[170%] max-sm:max-w-none [html.light_&]:block"
-      />
+    <div data-testid={`shot-${shot}`} className={cn('overflow-hidden rounded-[14px] border border-border bg-card max-sm:aspect-[5/4]', className)}>
+      <img src={src('dark')} onError={fail('dark')} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className={cn('block [html.light_&]:hidden', img)} />
+      <img src={src('light')} onError={fail('light')} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className={cn('hidden [html.light_&]:block', img)} />
     </div>
   );
 }
