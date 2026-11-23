@@ -7,6 +7,7 @@ import { cn } from '../../../components/cn';
 import { Badge, Button, Input, Label } from '../../../components/ui-kit';
 import { apiFetch } from '../../../services/api';
 import { notify } from '../../../components/dialog';
+import { applyAccent } from '../../../utils/accent';
 import { PRESENCE_SETTINGS, PRESENCE_SETTING_META } from '../../../components/presence';
 import { getDraft, useDraft } from '../../drafts';
 import { MemberAvatar } from '../tasks/AssigneePicker';
@@ -33,10 +34,9 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
   // Live accent preview while editing; back to the saved accent otherwise.
   // An empty drafted accent means "team default" — exactly what Save sends.
   useEffect(() => {
-    const root = document.documentElement;
     const candidates = draft ? [form.accent, team?.accent_color] : [user.accent_color, team?.accent_color];
-    const apply = candidates.find(validHex)?.trim();
-    if (apply) root.style.setProperty('--color-accent', apply); else root.style.removeProperty('--color-accent');
+    // Colour and data-accent together, so primary buttons preview the fill too.
+    applyAccent(candidates.find(validHex)?.trim());
     setColorVersion?.((v: number) => v + 1);
   }, [draft?.accent, user.accent_color, team?.accent_color]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -117,12 +117,12 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
       const cur = getDraft<ProfileDraft | null>(draftKey, null);
       if (cur) setDraft({ ...cur, accent: '' });
       const root = document.documentElement;
-      root.style.removeProperty('--color-accent');
+      applyAccent(data.user?.accent_color ?? null, root);
       root.style.removeProperty('--color-primary');
       root.style.removeProperty('--color-text-base');
       setColorVersion?.((v: number) => v + 1);
       refresh?.settings?.();
-      notify('Theme reset to the default Volt & Carbon colors.', 'success');
+      notify('Theme reset to the default colours.', 'success');
     } catch (e: any) {
       notify(e.message || 'Could not reset theme', 'error');
     }
@@ -214,7 +214,7 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
         <SettingsRow label="Roles">
           <span className="flex flex-wrap justify-end gap-1">{(user.roles || []).length ? user.roles.map((r: any) => <Badge key={r.id} variant="outline">{r.name}</Badge>) : <span className="text-sm text-muted-foreground">None</span>}</span>
         </SettingsRow>
-        <SettingsRow label="Colours" description="Clears custom colours and goes back to Volt & Carbon.">
+        <SettingsRow label="Colours" description="Clears custom colours and goes back to the default.">
           <Button variant="outline" size="sm" onClick={() => void resetTheme()}>Reset theme</Button>
         </SettingsRow>
       </SettingsGroup>

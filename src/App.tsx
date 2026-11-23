@@ -104,6 +104,7 @@ import DashboardView from './components/dashboard/DashboardView';
 import { useTranslation } from 'react-i18next';
 import { applyPulseOrigins, readPulseOrigins } from './utils/gridPulse';
 import { stripDescriptionImages } from './utils/taskImages';
+import { applyAccent } from './utils/accent';
 
 // Only accept real 6-digit hex colors. A junk string saved as a theme color
 // (e.g. "null", " ", "#") would make var(--color-accent) invalid and silently
@@ -137,6 +138,13 @@ function newSessionTag(): string {
 function forgetStoredSession() {
   noteSignIn(null);
   try { localStorage.removeItem(SESSION_TAG_KEY); localStorage.removeItem(LEGACY_SESSION_KEY); } catch { /* storage unavailable */ }
+  // Boot painted the cached team grid before the session check; with the
+  // session gone, signed-out pages get the default grid (the colour effect
+  // doesn't re-run here: none of its inputs change).
+  const root = document.documentElement;
+  root.style.removeProperty('--grid-rgb');
+  delete root.dataset.grid;
+  try { localStorage.removeItem(GRID_RGB_CACHE_KEY); } catch { /* storage unavailable */ }
 }
 /**
  * The boot-time session check, shared by every caller on this page load.
@@ -1019,12 +1027,10 @@ export default function App() {
       // data-accent="team" tells the stylesheet a chosen colour is in effect:
       // buttons fill with it, and the grid keeps its strength. Without it the
       // accent is the default slate blue and buttons stay neutral (index.css).
-      const clear = () => { root.style.removeProperty('--color-accent'); delete root.dataset.accent; };
+      const clear = () => applyAccent(null, root);
       if (isLoggedIn && currentUser) {
         const myTeam = teams.find(t => t.id === currentUser.team_id);
-        const accent = [currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim();
-        if (accent) { root.style.setProperty('--color-accent', accent); root.dataset.accent = 'team'; }
-        else clear();
+        applyAccent([currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim(), root);
         // Background grid + pulse follow the team branding (admin-set on
         // Teams & Members), not a member's personal accent.
         // Only act once we actually know the team's colour: the team row
