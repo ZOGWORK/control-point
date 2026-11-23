@@ -1,6 +1,7 @@
 // The logo is /logo.png; if it fails to load, BrandLogo draws the same mark inline. Both come from
 // scripts/make-icons.py: the faceted C (outer octagon, inner octagon and right-hand wedge masked out)
 // with the diamond control point inside it.
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { BrandLogo } from '../BrandMark';
@@ -33,4 +34,27 @@ describe('BrandLogo', () => {
     // No round shapes left from the old mark.
     expect(svg.querySelector('circle, path')).toBeNull();
   });
+});
+
+// A new mark only reaches browsers and installed apps if every URL to it changes. The manifest link
+// carries the same version as the icons it lists: a cached old manifest would keep the old icon URLs.
+describe('brand cache-busters', () => {
+  const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const manifest = JSON.parse(read('../../../public/manifest.webmanifest')) as { icons: { src: string }[] };
+  const iconVersions = new Set(manifest.icons.map((i) => /\?v=(\d+)$/.exec(i.src)?.[1]));
+
+  it('lists every manifest icon at one version', () => {
+    expect(iconVersions.size).toBe(1);
+    expect([...iconVersions][0]).toBeTruthy();
+  });
+
+  for (const page of ['../../../index.html', '../../../server/predict/how-it-works.html']) {
+    it(`${page.split('/').pop()} links the manifest, favicon and touch icon at the icons' version`, () => {
+      const html = read(page);
+      const v = [...iconVersions][0];
+      expect(html).toContain(`/manifest.webmanifest?v=${v}`);
+      expect(html).toContain(`/favicon.png?v=${v}`);
+      expect(html).toContain(`/apple-touch-icon.png?v=${v}`);
+    });
+  }
 });
