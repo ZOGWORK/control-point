@@ -127,7 +127,7 @@ export function NotebookEntryMeta({ pageId, teamId, revision, disabled }: { page
           </span>
         ))}
         {meta.awards.map((a) => (
-          <span key={a} className={`${chip} border-accent/50`} title={awardById(a)?.criteria}><Award className="size-3 text-accent" aria-hidden /> {awardById(a)?.name ?? a}
+          <span key={a} className={`${chip} border-line`} title={awardById(a)?.criteria}><Award className="size-3 text-text-muted" aria-hidden /> {awardById(a)?.name ?? a}
             {editable && <button type="button" aria-label={`Remove award ${awardById(a)?.name ?? a}`} onClick={() => toggle('awards', a)}><X className="size-3" /></button>}
           </span>
         ))}
