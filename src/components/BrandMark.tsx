@@ -1,6 +1,9 @@
 import { useId, useState } from 'react';
 import { cn } from './ui';
 
+/** The logo's URL. Bump the version whenever scripts/make-icons.py changes the mark; every logo <img> uses this. */
+export const LOGO_SRC = '/logo.png?v=6';
+
 /**
  * BrandMark — the Control Point logo slot.
  *
@@ -76,7 +79,7 @@ function LogoImage({ className, decorative = false }: { className?: string; deco
   }
   return (
     <img
-      src="/logo.png?v=6"
+      src={LOGO_SRC}
       alt={decorative ? '' : 'Control Point logo'}
       onError={() => setMissing(true)}
       className={cn('object-contain flex-shrink-0', className)}

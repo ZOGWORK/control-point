@@ -1,10 +1,12 @@
 // The logo is /logo.png; if it fails to load, BrandLogo draws the same mark inline. Both come from
 // scripts/make-icons.py: the faceted C (outer octagon, inner octagon and right-hand wedge masked out)
 // with the diamond control point inside it.
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { BrandLogo } from '../BrandMark';
+import { BrandLogo, LOGO_SRC } from '../BrandMark';
 
 afterEach(cleanup);
 
@@ -33,8 +35,17 @@ function renderFallback() {
 
 describe('BrandLogo', () => {
   it('serves the current logo image', () => {
+    expect(LOGO_SRC).toMatch(/^\/logo\.png\?v=\d+$/);
     render(<BrandLogo />);
-    expect(screen.getByRole('img', { name: 'Control Point logo' }).getAttribute('src')).toBe('/logo.png?v=6');
+    expect(screen.getByRole('img', { name: 'Control Point logo' }).getAttribute('src')).toBe(LOGO_SRC);
+  });
+
+  it('is the only place the logo URL is written, so one bump reaches every logo (the workspace switcher too)', () => {
+    const root = join(fileURLToPath(import.meta.url), '../../..'); // src/
+    const files = (readdirSync(root, { recursive: true }) as string[])
+      .filter((f) => /\.tsx?$/.test(f) && !/__tests__/.test(f) && !/BrandMark\.tsx$/.test(f));
+    const offenders = files.filter((f) => /\/logo\.png\?v=/.test(readFileSync(join(root, f), 'utf8')));
+    expect(offenders).toEqual([]);
   });
 
   it('falls back to the faceted C: outer octagon, inner octagon and mouth wedge', () => {
@@ -45,6 +56,14 @@ describe('BrandLogo', () => {
     expect([outer, inner, mouth].map((p) => p.getAttribute('fill'))).toEqual(['#fff', '#000', '#000']);
     // The inner octagon sits inside the outer one, so the C has a stroke all round.
     for (const p of points(inner)) expect(insideConvex(p, points(outer))).toBe(true);
+    // The mouth starts in the bowl and cuts right through the C's whole right-hand side, so it is open.
+    const [apex, ...far] = points(mouth);
+    expect(insideConvex(apex, points(inner))).toBe(true);
+    const o = points(outer), right = Math.max(...o.map(([x]) => x));
+    const edge = o.filter(([x]) => x === right).map(([, y]) => y);
+    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(right);
+    expect(Math.min(...far.map(([, y]) => y))).toBeLessThan(Math.min(...edge));
+    expect(Math.max(...far.map(([, y]) => y))).toBeGreaterThan(Math.max(...edge));
   });
 
   it('puts the diamond control point inside the C', () => {
@@ -76,7 +95,18 @@ describe('brand cache-busters', () => {
     iconVersion();
   });
 
-  for (const page of ['../../../index.html', '../../../server/predict/how-it-works.html']) {
+  const pages = ['../../../index.html', '../../../server/predict/how-it-works.html'];
+
+  it('gives the link preview one version on every page (og and twitter tags)', () => {
+    const found = pages.flatMap((page) => {
+      const v = [...read(page).matchAll(/\/og-image\.jpg\?v=(\d+)["']/g)].map((m) => m[1]);
+      expect(v, page).toHaveLength(2);
+      return v;
+    });
+    expect(new Set(found).size).toBe(1);
+  });
+
+  for (const page of pages) {
     it(`${page.split('/').pop()} links the manifest, favicon and touch icon at the icons' version`, () => {
       const v = iconVersion();
       const html = read(page);
