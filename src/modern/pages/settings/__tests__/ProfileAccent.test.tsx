@@ -55,4 +55,14 @@ describe('ProfileSection accent', () => {
     await act(async () => { finishTeams(); await Promise.resolve(); });
     expect(order).toEqual(['teams', 'user']);
   });
+
+  it('a failed team reload still completes the reset', async () => {
+    const teams = vi.fn(() => Promise.reject(new Error('offline')));
+    const onUserSaved = vi.fn();
+    apiFetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true, user: { ...user, accent_color: null } }) });
+    render(<ProfileSection currentUser={user} teams={[]} onUserSaved={onUserSaved} refresh={{ teams }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Reset theme' }));
+    await act(async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); });
+    expect(onUserSaved).toHaveBeenCalledWith(expect.objectContaining({ accent_color: null }));
+  });
 });

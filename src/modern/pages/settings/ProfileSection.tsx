@@ -116,7 +116,9 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
       // first, so App's colour effect never re-applies the old team colour from
       // stale state. Then apply the reset before dropping the draft, so the
       // preview doesn't snap back to the old saved accent.
-      await refresh?.teams?.();
+      // The reset already succeeded server-side: a failed reload must not turn
+      // it into an error (App re-syncs on the next successful team load).
+      try { await refresh?.teams?.(); } catch { /* keep going with the reset */ }
       onUserSaved?.(data.user ?? { ...user, accent_color: null });
       // Only the colours were reset — keep any unsaved name/title edits.
       const cur = getDraft<ProfileDraft | null>(draftKey, null);
