@@ -1,5 +1,6 @@
 // Small coloured text in the kit reaches WCAG AA (4.5:1) in both themes: the link button and the destructive
-// menu item. Their light-theme colours used to be volt #eab308 (1.9:1 on white) and rose 500 (3.7:1).
+// menu item. Their light-theme colours used to be volt #eab308 (1.9:1 on white) and rose 500 (3.7:1). The default
+// accent is now slate blue; a workspace or member's own colour is darkened on white (html.light[data-accent="team"]).
 import { readFileSync } from 'node:fs';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
@@ -27,19 +28,35 @@ const ratio = (a: RGB, b: RGB) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y
 const towardBlack = (c: RGB, p: number) => c.map((v) => Math.round(v * p)) as RGB;
 
 describe('kit text contrast', () => {
-  it('link buttons use the accent text colour, which holds on white for volt and for a light team colour', () => {
+  it('link buttons use the accent text colour, which holds on white for the default slate and for a light team colour', () => {
     render(<Button variant="link">Connect</Button>);
     expect(screen.getByRole('button', { name: 'Connect' }).className).toMatch(/(^|\s)text-accent-text(\s|$)/);
-
-    const mix = /^color-mix\(in srgb, var\(--color-accent\) (\d+)%, black\)/.exec(prop(index, 'html.light {', '--color-accent-text'));
-    expect(mix, 'light --color-accent-text darkens the accent').not.toBeNull();
-    const p = Number(mix![1]) / 100;
     const white: RGB = [255, 255, 255];
-    for (const accent of [prop(index, 'html.light {', '--color-accent'), '#22d3ee', '#a3e635', '#f472b6']) {
+
+    // The default slate is used as is on white.
+    expect(prop(index, 'html.light {', '--color-accent-text')).toBe('var(--color-accent)');
+    expect(ratio(hex(prop(index, 'html.light {', '--color-accent')), white)).toBeGreaterThanOrEqual(4.5);
+    // A team's own colour is darkened toward black.
+    const mix = /^color-mix\(in srgb, var\(--color-accent\) (\d+)%, black\)/.exec(prop(index, 'html.light[data-accent="team"] {', '--color-accent-text'));
+    expect(mix, 'light --color-accent-text darkens a team colour').not.toBeNull();
+    const p = Number(mix![1]) / 100;
+    for (const accent of ['#ffc700', '#22d3ee', '#a3e635', '#f472b6']) {
       expect(ratio(towardBlack(hex(accent), p), white), accent).toBeGreaterThanOrEqual(4.5);
     }
-    // Dark: the accent itself on the darkest card.
-    expect(ratio(hex(prop(index, '@theme', '--color-accent')), hex('#1a1a1f'))).toBeGreaterThanOrEqual(4.5);
+    // Dark: the accent itself on the lightest dark surface.
+    expect(ratio(hex(prop(index, '@theme', '--color-accent')), hex(prop(index, '@theme', '--color-elevated')))).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the default button is neutral, and fills with the accent only when a team or member chose a colour', () => {
+    render(<Button>Save</Button>);
+    const cls = screen.getByRole('button', { name: 'Save' }).className.split(/\s+/);
+    expect(cls).toContain('bg-ink/10');
+    expect(cls).not.toContain('bg-accent');
+    expect(cls).toContain('team-accent:bg-accent');
+    expect(index).toMatch(/@custom-variant team-accent \(&:where\(html\[data-accent="team"\], html\[data-accent="team"\] \*\)\);/);
+    // White text on the default slate fill in Light.
+    expect(ratio(hex(prop(index, 'html.light:not([data-accent="team"]) {', '--color-accent-ink')), hex(prop(index, 'html.light {', '--color-accent'))))
+      .toBeGreaterThanOrEqual(4.5);
   });
 
   it('destructive menu items use the destructive text colour, readable on the popover and on their focus tint', () => {

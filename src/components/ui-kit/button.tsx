@@ -1,5 +1,6 @@
 // shadcn/ui Button, mapped to Control Point tokens:
-//   shadcn primary  -> our accent (per-team colour) with accent-ink text
+//   shadcn primary  -> neutral (a faint ink fill with a hairline), as in Control Scout v8;
+//                      a workspace or member that chose a colour gets it as the fill (team-accent:)
 //   shadcn accent   -> a neutral text-base tint (hover fills)
 import * as React from 'react';
 import { Slot } from 'radix-ui';
@@ -14,7 +15,9 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-accent text-accent-ink font-bold shadow-[0_4px_16px_color-mix(in_srgb,var(--color-accent)_25%,transparent)] hover:brightness-105',
+        default: 'bg-ink/10 text-text-base ring-1 ring-inset ring-ink/[0.12] hover:bg-ink/[0.14] ' +
+          'team-accent:bg-accent team-accent:text-accent-ink team-accent:font-bold team-accent:ring-0 ' +
+          'team-accent:shadow-[0_4px_16px_color-mix(in_srgb,var(--color-accent)_25%,transparent)] team-accent:hover:bg-accent team-accent:hover:brightness-105',
         secondary: 'bg-elevated text-text-base border border-line hover:bg-text-base/[0.08]',
         outline: 'border border-line bg-transparent text-text-base hover:bg-text-base/[0.06] hover:border-text-base/20',
         ghost: 'text-text-muted hover:text-text-base hover:bg-text-base/[0.06]',
