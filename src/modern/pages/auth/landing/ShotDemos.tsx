@@ -191,14 +191,23 @@ function BudgetDemo({ play, reduce }: DemoProps) {
   useLayoutEffect(() => {
     const el = net.current;
     if (!el) return;
-    // The figure is written here only (React never owns this text). Reduced motion shows the
-    // final figure without latching, so turning it off before the row plays still counts up.
-    if (reduce) { el.textContent = money(NET); return; }
+    // The figure is written here only (React never owns this text). `started` means the row
+    // has played: under reduced motion that happens the moment it is in view (shown finished),
+    // so turning motion back on later doesn't recount it; turning it on before the row plays
+    // still counts up.
+    if (reduce) { if (play) started.current = true; el.textContent = money(NET); return; }
     if (started.current) return;
     if (!play) { el.textContent = money(0); return; }
     started.current = true;
-    const c = animate(0, NET, { delay: 0.3, duration: 1.2, ease: EASE_OUT, onUpdate: (v) => { el.textContent = money(v); } });
-    return () => c.stop();
+    let finished = false;
+    const c = animate(0, NET, {
+      delay: 0.3, duration: 1.2, ease: EASE_OUT,
+      onUpdate: (v) => { el.textContent = money(v); },
+      onComplete: () => { finished = true; },
+    });
+    // Stopped before the end (StrictMode's remount, or reduced motion turned on mid-count):
+    // un-latch so the next run of this effect plays it, or shows it finished, again.
+    return () => { c.stop(); if (!finished) started.current = false; };
   }, [play, reduce]);
   return (
     <>

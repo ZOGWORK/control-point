@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { StrictMode } from 'react';
 import { render, screen, cleanup, fireEvent, act, waitFor } from '@testing-library/react';
 
 // Drive the reduced-motion setting by hand so the test can flip it while the page is open.
@@ -86,6 +87,29 @@ describe('ModernLanding and reduced motion', () => {
     expect(net()).toHaveTextContent('$0.0');
     enterAll();
     await waitFor(() => expect(net()).toHaveTextContent(/^\$(?!0\.0$)/), { timeout: 2000 });
+    await waitFor(() => expect(net()).toHaveTextContent('$1,705.1'), { timeout: 4000 });
+  });
+
+  it('does not recount a balance that already finished under reduced motion when motion is turned back on', async () => {
+    motionPref.reduce = true;
+    const v = render(<ModernLanding onSignIn={vi.fn()} onGetStarted={vi.fn()} />);
+    fireEvent.load(screen.getAllByAltText(FEATURES[3].alt)[0]);
+    enterAll(); // the row has played (in its finished form)
+    const net = () => screen.getByTestId('demo-budget').querySelector('[data-demo-part="net"]');
+    expect(net()).toHaveTextContent('$1,705.1');
+
+    motionPref.reduce = false;
+    v.rerender(<ModernLanding onSignIn={vi.fn()} onGetStarted={vi.fn()} />);
+    expect(net()).toHaveTextContent('$1,705.1');
+    await new Promise((r) => setTimeout(r, 500));
+    expect(net()).toHaveTextContent('$1,705.1');
+  });
+
+  it('counts the balance up under StrictMode when the demo mounts with its row already in view', async () => {
+    render(<StrictMode><ModernLanding onSignIn={vi.fn()} onGetStarted={vi.fn()} /></StrictMode>);
+    enterAll(); // in view before the image loads, so the demo mounts already playing
+    fireEvent.load(screen.getAllByAltText(FEATURES[3].alt)[0]);
+    const net = () => screen.getByTestId('demo-budget').querySelector('[data-demo-part="net"]');
     await waitFor(() => expect(net()).toHaveTextContent('$1,705.1'), { timeout: 4000 });
   });
 });
