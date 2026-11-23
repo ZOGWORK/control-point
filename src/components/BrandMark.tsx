@@ -1,13 +1,13 @@
-import { useState } from 'react';
-import { Bolt } from 'lucide-react';
+import { useId, useState } from 'react';
 import { cn } from './ui';
 
 /**
  * BrandMark — the Control Point logo slot.
  *
- * The logo is `public/logo.png` (graphite tile, volt hex "C" with a center
- * point, matching Control Scout). If it fails to load, the built-in bolt
- * mark renders in the same colors.
+ * The logo is `public/logo.png` (Control Scout's v8 icon family: a round "C"
+ * with a control point in its opening, soft white on the near-black tile with
+ * the slate-to-mauve wash; drawn by scripts/make-icons.py). If it fails to
+ * load, the same mark renders inline as SVG.
  *
  * Includes the mini BETA badge next to the wordmark (intentionally tiny).
  */
@@ -28,21 +28,47 @@ export function BetaBadge({ className }: { className?: string }) {
   );
 }
 
+/** The mark alone (the C and its control point) filling its box, in the icon's soft-white ink. Path from scripts/make-icons.py. */
+function MarkSvg() {
+  const ink = `cp-ink-${useId().replace(/:/g, '')}`;
+  return (
+    <svg viewBox="0 0 100 100" className="w-full h-full" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={ink} x1="0" y1="18" x2="0" y2="82" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="1" stopColor="#dcd9e8" />
+        </linearGradient>
+      </defs>
+      <g fill={`url(#${ink})`}>
+        <path d="M65.29 26.77A29.47 29.47 0 1 0 75.74 58.57L63.69 51.38A15.3 15.3 0 1 1 53.09 35.35Z" />
+        <circle cx="68.42" cy="38.76" r="7.34" />
+      </g>
+    </svg>
+  );
+}
+
 // decorative: the name "Control Point" is right next to it, so screen readers
 // shouldn't hear it twice.
 function LogoImage({ className, decorative = false }: { className?: string; decorative?: boolean }) {
   const [missing, setMissing] = useState(false);
   if (missing) {
+    // Same look as /logo.png: the mark in soft white on the near-black tile, under a simple
+    // wash (slate blue to mauve, fading out by two-thirds down).
     return (
-      // Same look as /logo.png: graphite tile, volt mark (the Control Scout family style).
-      <div className={cn('bg-[#111110] rounded-2xl flex items-center justify-center flex-shrink-0', className)}>
-        <Bolt className="text-[#fed305] w-6 h-6" strokeWidth={2.5} />
+      <div
+        className={cn('rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden', className)}
+        style={{ background: 'linear-gradient(180deg, rgba(10,10,11,.15), #0a0a0b 70%), linear-gradient(90deg, #44587f, #4a4462 52%, #6e5076)' }}
+        role={decorative ? undefined : 'img'}
+        aria-label={decorative ? undefined : 'Control Point logo'}
+        aria-hidden={decorative || undefined}
+      >
+        <MarkSvg />
       </div>
     );
   }
   return (
     <img
-      src="/logo.png?v=4"
+      src="/logo.png?v=5"
       alt={decorative ? '' : 'Control Point logo'}
       onError={() => setMissing(true)}
       className={cn('object-contain flex-shrink-0', className)}
@@ -50,7 +76,7 @@ function LogoImage({ className, decorative = false }: { className?: string; deco
   );
 }
 
-/** Standalone logo image (with bolt fallback) for one-off placements. */
+/** Standalone logo image (with the inline-SVG fallback) for one-off placements. */
 export function BrandLogo({ className, decorative }: { className?: string; decorative?: boolean }) {
   return <LogoImage className={className} decorative={decorative} />;
 }
