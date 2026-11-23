@@ -14,14 +14,15 @@ html.light .landing-wash {
   --wash-grain: 0.05;
 }
 
-/* Each glow drifts on its own: a slow wave of a few percent and a soft swell, at three
-   lengths that never line up. Transform and opacity only; still under reduced motion. */
-.landing-wash-glow { will-change: transform, opacity; animation: landing-wash-drift-a 19s ease-in-out infinite alternate; }
-.landing-wash-glow[data-glow="1"] { animation-name: landing-wash-drift-b; animation-duration: 23s; animation-delay: -8s; }
-.landing-wash-glow[data-glow="2"] { animation-name: landing-wash-drift-c; animation-duration: 29s; animation-delay: -15s; }
-@keyframes landing-wash-drift-a { 0% { transform: translate3d(0, 0, 0) scale(1); opacity: 1; } 50% { transform: translate3d(3%, 4%, 0) scale(1.06); opacity: 0.8; } 100% { transform: translate3d(-1.5%, 2%, 0) scale(1.03); opacity: 0.95; } }
-@keyframes landing-wash-drift-b { 0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.95; } 50% { transform: translate3d(-3%, 4%, 0) scale(1.08); opacity: 0.78; } 100% { transform: translate3d(2%, 1.5%, 0) scale(1.02); opacity: 1; } }
-@keyframes landing-wash-drift-c { 0% { transform: translate3d(0, 0, 0) scale(1.02); opacity: 1; } 50% { transform: translate3d(-3.5%, 3%, 0) scale(1.07); opacity: 0.82; } 100% { transform: translate3d(1.5%, 4%, 0) scale(1); opacity: 0.92; } }
+/* Each glow drifts on its own: a slow wave of several percent and a soft swell, at three
+   lengths that never line up, so the top of the page is always quietly moving. Transform and
+   opacity only; still under reduced motion. */
+.landing-wash-glow { will-change: transform, opacity; animation: landing-wash-drift-a 16s ease-in-out infinite alternate; }
+.landing-wash-glow[data-glow="1"] { animation-name: landing-wash-drift-b; animation-duration: 21s; animation-delay: -8s; }
+.landing-wash-glow[data-glow="2"] { animation-name: landing-wash-drift-c; animation-duration: 26s; animation-delay: -15s; }
+@keyframes landing-wash-drift-a { 0% { transform: translate3d(0, 0, 0) scale(1); opacity: 1; } 50% { transform: translate3d(6%, 7%, 0) scale(1.12); opacity: 0.72; } 100% { transform: translate3d(-3%, 3%, 0) scale(1.05); opacity: 0.92; } }
+@keyframes landing-wash-drift-b { 0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.92; } 50% { transform: translate3d(-6%, 7%, 0) scale(1.14); opacity: 0.7; } 100% { transform: translate3d(4%, 3%, 0) scale(1.04); opacity: 1; } }
+@keyframes landing-wash-drift-c { 0% { transform: translate3d(0, 0, 0) scale(1.03); opacity: 1; } 50% { transform: translate3d(-7%, 5%, 0) scale(1.13); opacity: 0.74; } 100% { transform: translate3d(3%, 7%, 0) scale(1); opacity: 0.9; } }
 /* As specific as the per-glow rules above, so `none` wins over their animation-name. */
 @media (prefers-reduced-motion: reduce) {
   .landing-wash-glow, .landing-wash-glow[data-glow] { animation: none; will-change: auto; }
