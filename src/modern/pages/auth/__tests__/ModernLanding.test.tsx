@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -10,7 +10,7 @@ import { FEATURES } from '../landing/FeatureRows';
 import { usePublicPageView } from '../../../../utils/pageViews';
 
 globalThis.IntersectionObserver ??= class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } } as any;
-afterEach(cleanup);
+afterEach(() => { cleanup(); document.documentElement.classList.remove('light'); });
 
 const setup = () => {
   const onSignIn = vi.fn(); const onGetStarted = vi.fn();
@@ -93,6 +93,37 @@ describe('ModernLanding (v8)', () => {
     const f = FEATURES[1];
     const [dark] = screen.getAllByAltText(f.alt);
     fireEvent.load(dark);
+    expect(screen.getByTestId(`demo-${f.shot}`)).toBeInTheDocument();
+    fireEvent.error(dark);
+    expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument();
+  });
+
+  it('waits for the image of the theme on screen before laying a demo over it', async () => {
+    setup();
+    const f = FEATURES[2];
+    const [dark, light] = screen.getAllByAltText(f.alt);
+    // Dark on screen: the hidden Light file loading is not enough.
+    fireEvent.load(light);
+    expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument();
+    fireEvent.load(dark);
+    expect(screen.getByTestId(`demo-${f.shot}`)).toBeInTheDocument();
+    // Switch to Light with its file not yet loaded (fresh frame): no demo until it loads.
+    cleanup();
+    setup();
+    const [dark2, light2] = screen.getAllByAltText(f.alt);
+    fireEvent.load(dark2);
+    document.documentElement.classList.add('light');
+    await waitFor(() => expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument());
+    fireEvent.load(light2);
+    expect(screen.getByTestId(`demo-${f.shot}`)).toBeInTheDocument();
+  });
+
+  it('keeps the demo when only the hidden theme’s file fails', () => {
+    setup();
+    const f = FEATURES[3];
+    const [dark, light] = screen.getAllByAltText(f.alt);
+    fireEvent.load(dark);
+    fireEvent.error(light);
     expect(screen.getByTestId(`demo-${f.shot}`)).toBeInTheDocument();
     fireEvent.error(dark);
     expect(screen.queryByTestId(`demo-${f.shot}`)).not.toBeInTheDocument();

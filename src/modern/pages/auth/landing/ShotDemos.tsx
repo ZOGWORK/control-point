@@ -191,8 +191,11 @@ function BudgetDemo({ play, reduce }: DemoProps) {
   useLayoutEffect(() => {
     const el = net.current;
     if (!el) return;
-    if (reduce) { started.current = true; el.textContent = money(NET); return; }
-    if (!play || started.current) return;
+    // The figure is written here only (React never owns this text). Reduced motion shows the
+    // final figure without latching, so turning it off before the row plays still counts up.
+    if (reduce) { el.textContent = money(NET); return; }
+    if (started.current) return;
+    if (!play) { el.textContent = money(0); return; }
     started.current = true;
     const c = animate(0, NET, { delay: 0.3, duration: 1.2, ease: EASE_OUT, onUpdate: (v) => { el.textContent = money(v); } });
     return () => c.stop();
@@ -222,9 +225,7 @@ function BudgetDemo({ play, reduce }: DemoProps) {
           data-demo-part="net"
           className="absolute whitespace-nowrap font-display text-5xl font-semibold tabular-nums tracking-tight text-foreground"
           style={{ left: (92.5 - 90) / SCALE, top: (541.5 - 543) / SCALE + 7.5, fontSize: 54.2 }}
-        >
-          {money(reduce ? NET : 0)}
-        </span>
+        />
       </span>
     </>
   );

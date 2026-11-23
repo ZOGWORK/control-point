@@ -1,6 +1,6 @@
 // The landing's feature rows: a short heading and a line or two of copy beside a real
 // screenshot of that page (captured from a seeded demo workspace, Dark and Light).
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { motion, useInView, useReducedMotion } from 'motion/react';
 import { cn } from '../../../../components/cn';
 import { ShotDemo, hasDemo } from './ShotDemos';
@@ -68,15 +68,31 @@ export const FEATURES: Feature[] = [
   },
 ];
 
+/** The theme on screen: the <html> class (what the screenshots' CSS keys off), kept live. */
+function useShownTheme(): 'dark' | 'light' {
+  const read = (): 'dark' | 'light' => (typeof document !== 'undefined' && document.documentElement.classList.contains('light') ? 'light' : 'dark');
+  const [theme, setTheme] = useState(read);
+  useEffect(() => {
+    if (typeof MutationObserver === 'undefined') return;
+    const mo = new MutationObserver(() => setTheme(read()));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    setTheme(read());
+    return () => mo.disconnect();
+  }, []);
+  return theme;
+}
+
 /** A product screenshot in a hairline frame, with its live demo laid over it (ShotDemos).
  *  Both themes ship; the page's theme picks one. The demo waits for the image and for the
  *  frame to scroll into view, and under reduced motion shows its finished state.
  *  On phones the frame shows part of the page at a readable size instead of the whole page shrunk.
  *  If a theme's file fails to load, that theme shows the other theme's shot (without the demo,
- *  whose colours follow the page's theme); if both fail, the frame goes. */
+ *  whose colours follow the page's theme); if both fail, the frame goes. Only the image on
+ *  screen counts: the demo waits for it to load, and a failure of the hidden one changes nothing. */
 export function ProductShot({ shot, h, alt, phone, className }: { shot: string; h: number; alt: string; phone?: string; className?: string }) {
   const [broken, setBroken] = useState({ dark: false, light: false });
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState({ dark: false, light: false });
+  const shown = useShownTheme();
   const frame = useRef<HTMLDivElement>(null);
   const inView = useInView(frame, { once: true, amount: 0.6 });
   const reduce = !!useReducedMotion();
@@ -87,13 +103,13 @@ export function ProductShot({ shot, h, alt, phone, className }: { shot: string; 
   };
   // A failure on the fallback means the other file is broken too.
   const fail = (theme: 'dark' | 'light') => () => setBroken((b) => (b[theme] ? { dark: true, light: true } : { ...b, [theme]: true }));
-  const onLoad = () => setLoaded(true);
-  const demo = loaded && hasDemo(shot) && !broken.dark && !broken.light;
+  const onLoad = (theme: 'dark' | 'light') => () => setLoaded((l) => (l[theme] ? l : { ...l, [theme]: true }));
+  const demo = hasDemo(shot) && loaded[shown] && !broken[shown];
   return (
     <div ref={frame} data-testid={`shot-${shot}`} className={cn('overflow-hidden rounded-[14px] border border-border bg-card max-sm:aspect-[5/4]', className)}>
       <div className={cn('relative max-sm:w-[170%]', phone)}>
-        <img src={src('dark')} onError={fail('dark')} onLoad={onLoad} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className="block h-auto w-full [html.light_&]:hidden" />
-        <img src={src('light')} onError={fail('light')} onLoad={onLoad} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className="hidden h-auto w-full [html.light_&]:block" />
+        <img src={src('dark')} onError={fail('dark')} onLoad={onLoad('dark')} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className="block h-auto w-full [html.light_&]:hidden" />
+        <img src={src('light')} onError={fail('light')} onLoad={onLoad('light')} alt={alt} width={1600} height={h} loading="lazy" decoding="async" className="hidden h-auto w-full [html.light_&]:block" />
         {demo && <ShotDemo shot={shot} h={h} play={inView} reduce={reduce} />}
       </div>
     </div>
