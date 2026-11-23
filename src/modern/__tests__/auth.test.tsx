@@ -39,7 +39,8 @@ describe('Modern signed-out look', () => {
     const onSignIn = vi.fn(); const onGetStarted = vi.fn();
     const v = render(<ModernLanding onSignIn={onSignIn} onGetStarted={onGetStarted} />);
     expect(document.documentElement.dataset.ui).toBe('modern');
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    // The bar and the hero both offer Sign in (ModernLanding.test.tsx covers each exit).
+    fireEvent.click(screen.getAllByRole('button', { name: 'Sign in' })[0]);
     fireEvent.click(screen.getByRole('button', { name: /Create your workspace/ }));
     expect(onSignIn).toHaveBeenCalled();
     expect(onGetStarted).toHaveBeenCalled();
