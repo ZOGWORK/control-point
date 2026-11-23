@@ -38,6 +38,9 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
     // Colour and data-accent together, so primary buttons preview the fill too.
     applyAccent(candidates.find(validHex)?.trim());
     setColorVersion?.((v: number) => v + 1);
+    // Leaving the section (or the next preview) puts the saved colour back, so
+    // an unsaved draft never stays on the rest of the app.
+    return () => applyAccent([user.accent_color, team?.accent_color].find(validHex)?.trim());
   }, [draft?.accent, user.accent_color, team?.accent_color]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
@@ -109,10 +112,12 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
       const res = await apiFetch('/api/theme/reset', { method: 'POST' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not reset theme');
-      // Apply the reset before dropping the draft, so the preview doesn't
-      // snap back to the old saved accent.
+      // A workspace manager's reset clears the team colour too: load the teams
+      // first, so App's colour effect never re-applies the old team colour from
+      // stale state. Then apply the reset before dropping the draft, so the
+      // preview doesn't snap back to the old saved accent.
+      await refresh?.teams?.();
       onUserSaved?.(data.user ?? { ...user, accent_color: null });
-      refresh?.teams?.();
       // Only the colours were reset — keep any unsaved name/title edits.
       const cur = getDraft<ProfileDraft | null>(draftKey, null);
       if (cur) setDraft({ ...cur, accent: '' });
