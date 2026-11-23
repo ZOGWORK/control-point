@@ -179,7 +179,7 @@ export function DialogFooter({ className, ...props }: React.ComponentProps<'div'
   return <div data-slot="dialog-footer" className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)} {...props} />;
 }
 export function DialogTitle({ className, ...props }: React.ComponentProps<typeof D.Title>) {
-  return <D.Title data-slot="dialog-title" className={cn('font-display text-lg font-bold text-text-base', className)} {...props} />;
+  return <D.Title data-slot="dialog-title" className={cn('font-sans text-lg font-semibold tracking-[-0.015em] text-text-base', className)} {...props} />;
 }
 export function DialogDescription({ className, ...props }: React.ComponentProps<typeof D.Description>) {
   return <D.Description data-slot="dialog-description" className={cn('text-sm text-text-muted', className)} {...props} />;
