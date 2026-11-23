@@ -106,7 +106,7 @@ export function NotebookPolish({sync,editor,disabled,variant='ribbon'}:{sync:Not
         {error&&!busy&&<p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm">{error}</p>}
         {result&&editor&&!busy&&<>
           <div role="tablist" aria-label="Compare" className="flex gap-1 text-sm">
-            {(['after','before'] as const).map(v=><button key={v} type="button" role="tab" aria-selected={view===v} className={`rounded-md px-3 py-1 ${view===v?'bg-accent/15 font-medium':'text-muted-foreground'}`} onClick={()=>setView(v)}>{v==='after'?'Polished':'Original'}</button>)}
+            {(['after','before'] as const).map(v=><button key={v} type="button" role="tab" aria-selected={view===v} className={`rounded-lg px-3 py-1 ${view===v?'bg-ink/10 font-medium text-foreground':'text-muted-foreground hover:text-foreground'}`} onClick={()=>setView(v)}>{v==='after'?'Polished':'Original'}</button>)}
           </div>
           <Preview editor={editor} nodes={view==='after'?after:originals.current} label={view==='after'?'Polished version':'Original version'}/>
           {result.dropped.length>0&&<p role="alert" className="rounded-md bg-warning/10 px-3 py-2 text-sm">Not found in Bruno’s version: <strong>{result.dropped.join(', ')}</strong>. Check the Original tab before applying.</p>}

@@ -142,7 +142,7 @@ export function NotebookJournal({ open, onClose, onOpenPage, teamId }: { open: b
                         {e.type && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">{entryTypeLabel(e.type)}</span>}
                         {e.stage && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px]">{entryStageLabel(e.stage)}</span>}
                         {e.subsystems.map((s) => <span key={s} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px]"><Cog className="size-3" aria-hidden />{s}</span>)}
-                        {e.awards.map((a) => <span key={a} title={awardById(a)?.criteria} className="inline-flex items-center gap-1 rounded-full border border-accent/50 px-2 py-0.5 text-[11px]"><Award className="size-3 text-accent" aria-hidden />{awardById(a)?.name ?? a}</span>)}
+                        {e.awards.map((a) => <span key={a} title={awardById(a)?.criteria} className="inline-flex items-center gap-1 rounded-full border border-ink/12 px-2 py-0.5 text-[11px]"><Award className="size-3 text-muted-foreground" aria-hidden />{awardById(a)?.name ?? a}</span>)}
                       </span>
                       <span className="text-[11px] text-muted-foreground">{e.sectionTitle}{e.authors.length ? ` · ${e.authors.join(', ')}` : ''}{e.readMinutes ? ` · ${e.readMinutes} min read` : ''}</span>
                     </button>
