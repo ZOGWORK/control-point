@@ -39,7 +39,7 @@ export function WelcomeDialog({ userName, onGetStarted, onSkip }: { userName?: s
                   <BrandLogo className="size-12 rounded-xl" />
                 </motion.div>
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, ease, delay: 0.1 }}>
-                  <DialogTitle className="mt-8 font-display text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+                  <DialogTitle className="mt-8 text-3xl font-semibold leading-tight tracking-[-0.025em] sm:text-4xl">
                     {firstName ? <>Welcome,<br />{firstName}.</> : <>Welcome to<br />Control Point.</>}
                   </DialogTitle>
                   <DialogDescription className="mt-3 text-sm leading-relaxed">

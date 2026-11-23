@@ -127,7 +127,7 @@ export function SetupDialog(props: SetupWizardProps) {
                 {STEPS.map((s, i) => <span key={s.title} className={cn('h-1 flex-1 rounded-full transition-colors', i <= w.step ? 'bg-accent' : 'bg-foreground/10')} />)}
               </div>
               <p className="text-xs text-muted-foreground">Step {w.step + 1} of 4</p>
-              <DialogTitle className="mt-1 font-display text-xl font-semibold tracking-tight">{STEPS[w.step].title}</DialogTitle>
+              <DialogTitle className="mt-1 text-xl font-semibold tracking-tight">{STEPS[w.step].title}</DialogTitle>
               <DialogDescription className="sr-only">Set up your profile, look and tour.</DialogDescription>
               {w.error && (
                 <div role="alert" className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
