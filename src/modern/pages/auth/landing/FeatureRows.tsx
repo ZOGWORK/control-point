@@ -4,17 +4,21 @@ import { useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { cn } from '../../../../components/cn';
 
-/** Fades a block up once as it scrolls in (300ms). Under reduced motion it is simply there. */
+/** Fades a block up once as it scrolls in (300ms). Under reduced motion it is simply there.
+ *  Always the same element, so flipping the reduced-motion setting never remounts what's inside
+ *  (an open FAQ answer, a screenshot's fallback state); a block still hidden when motion is
+ *  turned off snaps into place. */
 export function FadeUp({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
-  if (reduce) return <div className={className}>{children}</div>;
+  const shown = { opacity: 1, y: 0 };
   return (
     <motion.div
       className={className}
-      initial={{ opacity: 0, y: 12 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      initial={reduce ? false : { opacity: 0, y: 12 }}
+      animate={reduce ? shown : undefined}
+      whileInView={reduce ? undefined : shown}
       viewport={{ once: true, margin: '-40px' }}
-      transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
+      transition={reduce ? { duration: 0 } : { duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
     >
       {children}
     </motion.div>
