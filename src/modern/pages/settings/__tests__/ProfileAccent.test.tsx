@@ -10,6 +10,7 @@ vi.mock('../../../../components/dialog', () => ({ notify: vi.fn() }));
 
 import { ProfileSection } from '../ProfileSection';
 import { clearDrafts, setDraft } from '../../../drafts';
+import { applySavedAccent } from '../../../../utils/accent';
 
 const root = document.documentElement;
 afterEach(() => {
@@ -33,19 +34,17 @@ describe('ProfileSection accent', () => {
     expect(root.dataset.accent).toBeUndefined();
   });
 
-  it('keeps previewing the draft after a theme toggle re-applies the saved colour', () => {
+  it("keeps previewing the draft whenever App re-applies the saved colour, in any order", () => {
     setDraft('settings:profile:7', { name: 'Dev', role: 'Admin', accent: '#22c55e' });
-    // App's own listener, added before the section mounts, re-applies the saved (default) colour.
-    const appReapply = () => { root.style.removeProperty('--color-accent'); delete root.dataset.accent; };
-    window.addEventListener('cp-theme-change', appReapply);
-    try {
-      render(<ProfileSection currentUser={user} teams={[{ id: 1, accent_color: null }]} />);
-      window.dispatchEvent(new Event('cp-theme-change'));
-      expect(root.style.getPropertyValue('--color-accent')).toBe('#22c55e');
-      expect(root.dataset.accent).toBe('team');
-    } finally {
-      window.removeEventListener('cp-theme-change', appReapply);
-    }
+    const view = render(<ProfileSection currentUser={user} teams={[{ id: 1, accent_color: null }]} />);
+    // App's colour effect (theme toggle, team load, user change) re-applies the saved colour.
+    applySavedAccent(null);
+    expect(root.style.getPropertyValue('--color-accent')).toBe('#22c55e');
+    expect(root.dataset.accent).toBe('team');
+    // Once the section closes, App's saved colour applies again.
+    view.unmount();
+    applySavedAccent(null);
+    expect(root.dataset.accent).toBeUndefined();
   });
 
   it('keeps the team colour after closing when the member has none', () => {

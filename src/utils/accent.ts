@@ -17,3 +17,22 @@ export function applyAccent(hex: string | null | undefined, root: HTMLElement = 
     delete root.dataset.accent;
   }
 }
+
+/**
+ * Settings › Profile previews an unsaved colour across the app. While a preview
+ * is active, App's colour effect (which re-runs on theme toggles, team loads,
+ * user changes…) must not paint the saved colour over it: it calls
+ * applySavedAccent, which yields to the preview. Explicit state, so listener
+ * order never matters.
+ */
+let preview: { hex: string | null } | null = null;
+
+/** Start (active) or end the preview. The previewed colour may be null (the default). */
+export function setAccentPreview(active: boolean, hex?: string | null): void {
+  preview = active ? { hex: hex ?? null } : null;
+}
+
+/** Apply the saved colour, unless a preview is active (then keep the preview). */
+export function applySavedAccent(hex: string | null | undefined, root: HTMLElement = document.documentElement): void {
+  applyAccent(preview ? preview.hex : hex, root);
+}

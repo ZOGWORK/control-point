@@ -7,7 +7,7 @@ import { cn } from '../../../components/cn';
 import { Badge, Button, Input, Label } from '../../../components/ui-kit';
 import { apiFetch } from '../../../services/api';
 import { notify } from '../../../components/dialog';
-import { applyAccent } from '../../../utils/accent';
+import { applyAccent, setAccentPreview } from '../../../utils/accent';
 import { PRESENCE_SETTINGS, PRESENCE_SETTING_META } from '../../../components/presence';
 import { getDraft, useDraft } from '../../drafts';
 import { MemberAvatar } from '../tasks/AssigneePicker';
@@ -36,16 +36,16 @@ export function ProfileSection({ currentUser, teams = [], onUserSaved, onStatusP
   useEffect(() => {
     const candidates = draft ? [form.accent, team?.accent_color] : [user.accent_color, team?.accent_color];
     // Colour and data-accent together, so primary buttons preview the fill too.
-    const preview = () => applyAccent(candidates.find(validHex)?.trim());
-    preview();
+    // While drafting, the preview is registered so App's colour effect (theme
+    // toggles, team loads…) keeps it instead of repainting the saved colour.
+    const shown = candidates.find(validHex)?.trim();
+    setAccentPreview(!!draft, shown);
+    applyAccent(shown);
     setColorVersion?.((v: number) => v + 1);
-    // A theme toggle makes App re-apply the saved colour (its cp-theme-change
-    // listener was added first, so it runs first); put the preview back after it.
-    window.addEventListener('cp-theme-change', preview);
     // Leaving the section (or the next preview) puts the saved colour back, so
     // an unsaved draft never stays on the rest of the app.
     return () => {
-      window.removeEventListener('cp-theme-change', preview);
+      setAccentPreview(false);
       applyAccent([user.accent_color, team?.accent_color].find(validHex)?.trim());
     };
   }, [draft?.accent, user.accent_color, team?.accent_color]); // eslint-disable-line react-hooks/exhaustive-deps

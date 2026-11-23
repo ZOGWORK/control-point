@@ -104,7 +104,7 @@ import DashboardView from './components/dashboard/DashboardView';
 import { useTranslation } from 'react-i18next';
 import { applyPulseOrigins, readPulseOrigins } from './utils/gridPulse';
 import { stripDescriptionImages } from './utils/taskImages';
-import { applyAccent } from './utils/accent';
+import { applyAccent, applySavedAccent } from './utils/accent';
 
 // Only accept real 6-digit hex colors. A junk string saved as a theme color
 // (e.g. "null", " ", "#") would make var(--color-accent) invalid and silently
@@ -1030,7 +1030,7 @@ export default function App() {
       const clear = () => applyAccent(null, root);
       if (isLoggedIn && currentUser) {
         const myTeam = teams.find(t => t.id === currentUser.team_id);
-        applyAccent([currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim(), root);
+        applySavedAccent([currentUser.accent_color, myTeam?.accent_color].find(validHex)?.trim(), root);
         // Background grid + pulse follow the team branding (admin-set on
         // Teams & Members), not a member's personal accent.
         // Only act once we actually know the team's colour: the team row
