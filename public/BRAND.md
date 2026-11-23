@@ -1,9 +1,9 @@
 # Brand logo
 
-The logo is a heavy round "C" with a control point (a solid round node) in its
-opening, in soft white on a near-black tile with a wash of colour across the
-top. It is a sibling of Control Scout's v8 icon: the same tile, wash, grain, C
-and ink, with a node where Scout has its compass needle.
+The logo is a faceted "C" (an octagon with sharp, chamfered corners, open on the
+right) with the control point, a diamond, inside it, in soft white on a near-black
+tile with a wash of colour across the top. It shares Control Scout's v8 tile, wash,
+grain and ink, but the mark is its own: sharp where Scout's C is round.
 
 - Graphite background: `#0a0a0b`
 - Ink: white `#ffffff` at the top to `#dcd9e8` at the bottom, with a soft shadow

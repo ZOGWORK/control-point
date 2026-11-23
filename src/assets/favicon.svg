@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <!-- The Control Point mark (scripts/make-icons.py): the round C with a control point in its opening,
+  <!-- The Control Point mark (scripts/make-icons.py): the faceted C with its diamond control point inside,
        soft white on the near-black tile, with a simple wash (slate blue to mauve) across the top. -->
   <defs>
     <linearGradient id="cp-wash" x1="0" y1="0" x2="1" y2="0">
@@ -11,6 +11,11 @@
       <stop offset="0" stop-color="#0a0a0b" stop-opacity="0.15"/>
       <stop offset="0.7" stop-color="#0a0a0b" stop-opacity="1"/>
     </linearGradient>
+    <mask id="cp-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <polygon points="34.45,22.49 65.55,22.49 77.51,34.45 77.51,65.55 65.55,77.51 34.45,77.51 22.49,65.55 22.49,34.45" fill="#fff"/>
+      <polygon points="42.66,36.44 57.34,36.44 63.56,42.66 63.56,57.34 57.34,63.56 42.66,63.56 36.44,57.34 36.44,42.66" fill="#000"/>
+      <polygon points="50,50 100,23.68 100,76.32" fill="#000"/>
+    </mask>
     <linearGradient id="cp-ink" x1="0" y1="18" x2="0" y2="82" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ffffff"/>
       <stop offset="1" stop-color="#dcd9e8"/>
@@ -19,7 +24,7 @@
   <rect width="100" height="100" fill="url(#cp-wash)"/>
   <rect width="100" height="100" fill="url(#cp-fade)"/>
   <g fill="url(#cp-ink)">
-    <path d="M65.29 26.77A29.47 29.47 0 1 0 75.74 58.57L63.69 51.38A15.3 15.3 0 1 1 53.09 35.35Z"/>
-    <circle cx="68.42" cy="38.76" r="7.34"/>
+    <rect width="100" height="100" mask="url(#cp-cut)"/>
+    <polygon points="49.2,41.63 57.58,50 49.2,58.37 40.83,50"/>
   </g>
 </svg>

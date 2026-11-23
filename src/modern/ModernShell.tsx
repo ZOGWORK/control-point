@@ -34,6 +34,7 @@ import { applyNavOrder, buildModernNav, isActive, moveId, type ModernNavItem, ty
 import { CommandMenu, type CommandAction } from './CommandMenu';
 import { useInterfaceMode } from './interfaceMode';
 import { RouteErrorBoundary } from '../components/ErrorBoundary';
+import { LOGO_SRC } from '../components/BrandMark';
 import { installPrintTheme } from './ui/ExportMenu';
 import { GRID_PREFS_EVENT, applyGridPrefs, readGridPrefs, type GridPrefs } from './gridPrefs';
 
@@ -601,7 +602,7 @@ function WorkspaceSwitcher({ collapsed, teams, activeTeam, activeTeamName, onSwi
             collapsed ? 'size-10 justify-center' : 'h-10 flex-1 px-2',
           )}
         >
-          <img src="/logo.png?v=5" alt="" className="size-6 shrink-0 rounded-md" />
+          <img src={LOGO_SRC} alt="" className="size-6 shrink-0 rounded-md" />
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-base">{activeTeamName || 'Control Point'}</span>
