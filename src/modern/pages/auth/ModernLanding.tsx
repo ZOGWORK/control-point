@@ -11,7 +11,7 @@ import { cn } from '../../../components/cn';
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger, Button,
 } from '../../../components/ui-kit';
-import { BrandLogo } from '../../../components/BrandMark';
+import { BrandGlyph, BrandLogo } from '../../../components/BrandMark';
 import { CONTACT_EMAIL } from '../../../utils/contact';
 import { SignedOutModern } from '../../signedOut';
 import { LandingWash } from './landing/LandingWash';
@@ -101,7 +101,7 @@ export function ModernLanding({ onSignIn, onGetStarted }: { onSignIn: () => void
           <section className="px-4 pb-28 pt-20 sm:px-6 sm:pb-44 sm:pt-28" aria-labelledby="landing-title">
             <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
               <HeroIn step={0}>
-                <BrandLogo className="size-16 rounded-2xl ring-1 ring-ink/12 sm:size-[72px]" decorative />
+                <BrandGlyph className="size-14 text-foreground sm:size-16" />
               </HeroIn>
               <HeroIn step={1}>
                 <h1 id="landing-title" className="mt-8 text-balance font-sans text-[2.5rem] font-semibold leading-[1.05] tracking-[-0.035em] sm:text-6xl lg:text-[4.25rem]">

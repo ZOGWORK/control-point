@@ -2,13 +2,15 @@ import { useId, useState } from 'react';
 import { cn } from './ui';
 
 /** The logo's URL. Bump the version whenever scripts/make-icons.py changes the mark; every logo <img> uses this. */
-export const LOGO_SRC = '/logo.png?v=7';
+export const LOGO_SRC = '/logo.png?v=8';
+/** The bare mark (white on transparent, no tile), same version as the logo. */
+export const MARK_SRC = '/mark.png?v=8';
 
 /**
  * BrandMark — the Control Point logo slot.
  *
- * The logo is `public/logo.png` (Control Scout's v8 icon family: a faceted,
- * sharp-cornered "C" with the control point, a diamond, inside it; soft white on
+ * The logo is `public/logo.png` (Control Scout's v8 icon family: a round "C" cut
+ * open by a crisp wedge, with the control point, a diamond, inside it; soft white on
  * the near-black tile with the slate-to-mauve wash; drawn by scripts/make-icons.py).
  * If it fails to load, the same mark renders inline as SVG.
  *
@@ -31,9 +33,9 @@ export function BetaBadge({ className }: { className?: string }) {
   );
 }
 
-/** The mark alone (the faceted C and its diamond point) filling its box, in the icon's soft-white ink.
- *  Polygons from scripts/make-icons.py (mark_polys), scaled to the 100-unit box: the C is the outer
- *  octagon with the inner octagon and the right-hand wedge masked out. */
+/** The mark alone (the round C and its diamond point) filling its box, in the icon's soft-white ink.
+ *  Shapes from scripts/make-icons.py (mark_shapes), scaled to the 100-unit box: the C is the outer
+ *  circle with the inner circle and the right-hand wedge masked out. */
 function MarkSvg() {
   const id = useId().replace(/:/g, '');
   const ink = `cp-ink-${id}`, cut = `cp-cut-${id}`;
@@ -45,8 +47,8 @@ function MarkSvg() {
           <stop offset="1" stopColor="#dcd9e8" />
         </linearGradient>
         <mask id={cut} maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
-          <polygon points="34.45,22.49 65.55,22.49 77.51,34.45 77.51,65.55 65.55,77.51 34.45,77.51 22.49,65.55 22.49,34.45" fill="#fff" />
-          <polygon points="42.66,36.44 57.34,36.44 63.56,42.66 63.56,57.34 57.34,63.56 42.66,63.56 36.44,57.34 36.44,42.66" fill="#000" />
+          <circle cx="50" cy="50" r="27.51" fill="#fff" />
+          <circle cx="50" cy="50" r="14.51" fill="#000" />
           <polygon points="50,50 100,23.68 100,76.32" fill="#000" />
         </mask>
       </defs>
@@ -83,6 +85,20 @@ function LogoImage({ className, decorative = false }: { className?: string; deco
       alt={decorative ? '' : 'Control Point logo'}
       onError={() => setMissing(true)}
       className={cn('object-contain flex-shrink-0', className)}
+    />
+  );
+}
+
+/** The bare C (public/mark.png, no tile), painted in the current text colour through a CSS mask
+ *  so it reads in both themes. Decorative: callers put it next to the name. */
+export function BrandGlyph({ className }: { className?: string }) {
+  const url = `url(${MARK_SRC})`;
+  return (
+    <span
+      aria-hidden="true"
+      data-brand-glyph=""
+      className={cn('inline-block flex-shrink-0 bg-current', className)}
+      style={{ maskImage: url, WebkitMaskImage: url, maskSize: 'contain', WebkitMaskSize: 'contain', maskRepeat: 'no-repeat', WebkitMaskRepeat: 'no-repeat', maskPosition: 'center', WebkitMaskPosition: 'center' }}
     />
   );
 }

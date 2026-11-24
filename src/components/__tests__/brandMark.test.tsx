@@ -1,12 +1,12 @@
 // The logo is /logo.png; if it fails to load, BrandLogo draws the same mark inline. Both come from
-// scripts/make-icons.py: the faceted C (outer octagon, inner octagon and right-hand wedge masked out)
-// with the diamond control point inside it.
+// scripts/make-icons.py: the round C (outer circle, inner circle and right-hand wedge masked out)
+// with the diamond control point inside it. /mark.png is the same mark bare, for BrandGlyph.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { BrandLogo, LOGO_SRC } from '../BrandMark';
+import { BrandGlyph, BrandLogo, LOGO_SRC, MARK_SRC } from '../BrandMark';
 
 afterEach(cleanup);
 
@@ -45,37 +45,47 @@ describe('BrandLogo', () => {
     const files = (readdirSync(root, { recursive: true }) as string[])
       .filter((f) => /\.tsx?$/.test(f) && !/__tests__/.test(f) && !/BrandMark\.tsx$/.test(f));
     // Any mention, versioned or not: an unversioned copy would bypass the cache-buster entirely.
-    const offenders = files.filter((f) => /logo\.png/.test(readFileSync(join(root, f), 'utf8')));
+    const offenders = files.filter((f) => /(logo|mark)\.png/.test(readFileSync(join(root, f), 'utf8')));
     expect(offenders).toEqual([]);
   });
 
-  it('falls back to the faceted C: outer octagon, inner octagon and mouth wedge', () => {
+  it('falls back to the round C: outer circle, inner circle and mouth wedge', () => {
     const mask = renderFallback().querySelector('mask')!;
-    const [outer, inner, mouth] = [...mask.querySelectorAll('polygon')];
-    expect(mask.querySelectorAll('polygon')).toHaveLength(3);
-    expect([outer, inner, mouth].map((p) => points(p).length)).toEqual([8, 8, 3]);
+    const [outer, inner] = [...mask.querySelectorAll('circle')];
+    const mouth = mask.querySelector('polygon')!;
+    expect(mask.querySelectorAll('circle')).toHaveLength(2);
+    expect(mask.querySelectorAll('polygon')).toHaveLength(1);
     expect([outer, inner, mouth].map((p) => p.getAttribute('fill'))).toEqual(['#fff', '#000', '#000']);
-    // The inner octagon sits inside the outer one, so the C has a stroke all round.
-    for (const p of points(inner)) expect(insideConvex(p, points(outer))).toBe(true);
-    // The mouth starts in the bowl and cuts right through the C's whole right-hand side, so it is open.
+    const c = (el: Element) => ['cx', 'cy', 'r'].map((k) => Number(el.getAttribute(k)));
+    const [ox, oy, R] = c(outer), [ix, iy, r] = c(inner);
+    // Concentric, with a real stroke all round.
+    expect([ix, iy]).toEqual([ox, oy]);
+    expect(r).toBeGreaterThan(0);
+    expect(R - r).toBeGreaterThan(R * 0.3);
+    // The mouth starts in the bowl and cuts right through the ring's right-hand side, so it is open.
     const [apex, ...far] = points(mouth);
-    expect(insideConvex(apex, points(inner))).toBe(true);
-    const o = points(outer), right = Math.max(...o.map(([x]) => x));
-    const edge = o.filter(([x]) => x === right).map(([, y]) => y);
-    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(right);
-    expect(Math.min(...far.map(([, y]) => y))).toBeLessThan(Math.min(...edge));
-    expect(Math.max(...far.map(([, y]) => y))).toBeGreaterThan(Math.max(...edge));
+    expect(Math.hypot(apex[0] - ix, apex[1] - iy)).toBeLessThan(r);
+    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(ox + R);
   });
 
   it('puts the diamond control point inside the C', () => {
     const svg = renderFallback();
-    const inner = points(svg.querySelectorAll('mask polygon')[1]);
+    const inner = svg.querySelectorAll('mask circle')[1];
+    const [cx, cy, r] = ['cx', 'cy', 'r'].map((k) => Number(inner.getAttribute(k)));
     const diamond = points(svg.querySelector(':scope > g > polygon')!);
     expect(diamond).toHaveLength(4);
-    // Every corner inside the inner octagon itself (not just its bounding box), so it never touches the stroke.
-    for (const p of diamond) expect(insideConvex(p, inner)).toBe(true);
-    // No round shapes left from the old mark.
-    expect(svg.querySelector('circle, path')).toBeNull();
+    // Every corner inside the bowl, so it never touches the stroke.
+    for (const [x, y] of diamond) expect(Math.hypot(x - cx, y - cy)).toBeLessThan(r);
+  });
+});
+
+describe('BrandGlyph', () => {
+  it('paints the bare mark.png in the text colour, hidden from screen readers', () => {
+    const { container } = render(<BrandGlyph className="size-16" />);
+    const el = container.querySelector('[data-brand-glyph]') as HTMLElement;
+    expect(el.getAttribute('aria-hidden')).toBe('true');
+    expect(el.className).toContain('bg-current');
+    expect(el.style.maskImage || el.style.getPropertyValue('-webkit-mask-image')).toContain(MARK_SRC);
   });
 });
 
@@ -97,8 +107,9 @@ describe('brand cache-busters', () => {
     iconVersion();
   });
 
-  it('serves the in-app logo at the same version', () => {
+  it('serves the in-app logo and the bare mark at the same version', () => {
     expect(LOGO_SRC).toBe(`/logo.png?v=${iconVersion()}`);
+    expect(MARK_SRC).toBe(`/mark.png?v=${iconVersion()}`);
   });
 
   const pages = ['../../../index.html', '../../../server/predict/how-it-works.html'];
