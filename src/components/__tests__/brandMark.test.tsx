@@ -1,5 +1,5 @@
 // The logo is /logo.png; if it fails to load, BrandLogo draws the same mark inline. Both come from
-// scripts/make-icons.py: the round C (outer circle, inner circle and right-hand wedge masked out)
+// scripts/make-icons.py: the rounded-square C (outer squircle, inner squircle and right-hand wedge masked out)
 // with the diamond control point inside it. /mark.png is the same mark bare, for BrandGlyph.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,33 +49,42 @@ describe('BrandLogo', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('falls back to the round C: outer circle, inner circle and mouth wedge', () => {
+  it('falls back to the rounded-square C: outer squircle, inner squircle and mouth wedge', () => {
     const mask = renderFallback().querySelector('mask')!;
-    const [outer, inner] = [...mask.querySelectorAll('circle')];
-    const mouth = mask.querySelector('polygon')!;
-    expect(mask.querySelectorAll('circle')).toHaveLength(2);
-    expect(mask.querySelectorAll('polygon')).toHaveLength(1);
+    const [outer, inner, mouth] = [...mask.querySelectorAll('polygon')];
+    expect(mask.querySelectorAll('polygon')).toHaveLength(3);
+    expect(mask.querySelector('circle')).toBeNull(); // not a circle
     expect([outer, inner, mouth].map((p) => p.getAttribute('fill'))).toEqual(['#fff', '#000', '#000']);
-    const c = (el: Element) => ['cx', 'cy', 'r'].map((k) => Number(el.getAttribute(k)));
-    const [ox, oy, R] = c(outer), [ix, iy, r] = c(inner);
-    // Concentric, with a real stroke all round.
-    expect([ix, iy]).toEqual([ox, oy]);
-    expect(r).toBeGreaterThan(0);
-    expect(R - r).toBeGreaterThan(R * 0.3);
-    // The mouth starts in the bowl and cuts right through the ring's right-hand side, so it is open.
+    const o = points(outer), i = points(inner);
+    // The inner squircle sits inside the outer one, so the C has a stroke all round.
+    for (const p of i) expect(insideConvex(p, o)).toBe(true);
+    // Squircle, not circle: the corner (on the diagonal) reaches well past a circle's radius.
+    const half = (Math.max(...o.map(([x]) => x)) - Math.min(...o.map(([x]) => x))) / 2;
+    const corner = Math.max(...o.map(([x, y]) => Math.hypot(x - 50, y - 50)));
+    expect(corner).toBeGreaterThan(half * 1.1);
+    // The mouth starts in the bowl and cuts right through the C's right-hand side, so it is open.
     const [apex, ...far] = points(mouth);
-    expect(Math.hypot(apex[0] - ix, apex[1] - iy)).toBeLessThan(r);
-    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(ox + R);
+    expect(insideConvex(apex, i)).toBe(true);
+    const right = Math.max(...o.map(([x]) => x));
+    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(right);
   });
 
-  it('puts the diamond control point inside the C', () => {
+  it('keeps the mark even: both squircles and the diamond share one centre', () => {
     const svg = renderFallback();
-    const inner = svg.querySelectorAll('mask circle')[1];
-    const [cx, cy, r] = ['cx', 'cy', 'r'].map((k) => Number(inner.getAttribute(k)));
+    const [outer, inner] = [...svg.querySelectorAll('mask polygon')].map(points);
     const diamond = points(svg.querySelector(':scope > g > polygon')!);
+    const centre = (pts: Pt[]) => {
+      const xs = pts.map(([x]) => x), ys = pts.map(([, y]) => y);
+      return [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    };
+    for (const pts of [outer, inner, diamond]) {
+      const [x, y] = centre(pts);
+      expect(x).toBeCloseTo(50, 1);
+      expect(y).toBeCloseTo(50, 1);
+    }
     expect(diamond).toHaveLength(4);
     // Every corner inside the bowl, so it never touches the stroke.
-    for (const [x, y] of diamond) expect(Math.hypot(x - cx, y - cy)).toBeLessThan(r);
+    for (const p of diamond) expect(insideConvex(p, inner)).toBe(true);
   });
 });
 

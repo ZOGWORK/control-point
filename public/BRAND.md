@@ -1,7 +1,7 @@
 # Brand logo
 
-The logo is a round "C" (a ring cut open on the right by a wedge, so its ends are
-crisp radial cuts) with the control point, a diamond, inside it, in soft white on a near-black
+The logo is a rounded-square "C" (a squircle ring with an even stroke, cut open on
+the right by a wedge so its ends are crisp) with the control point, a diamond, dead centre, in soft white on a near-black
 tile with a wash of colour across the top. It shares Control Scout's v8 tile, wash,
 grain and ink, but the mark is its own: a diamond point where Scout has a needle.
 

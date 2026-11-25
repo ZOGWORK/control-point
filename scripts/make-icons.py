@@ -6,8 +6,9 @@ so a re-run with no code change leaves every file byte-identical.
 The tile is a sibling of Control Scout's v8 icon (control-scout scripts/brand-icon.mjs):
 the same near-black tile with the same wash of three glows along the top edge, the
 same fine grain, and the mark in the same soft white with a soft shadow. The mark is
-Control Point's own: a round C cut open by a crisp wedge (sharp, radial ends), with the
-control point (a diamond) inside it, so it does not read as Scout's C with its needle.
+Control Point's own: a rounded-square C (a squircle ring, even stroke all round) cut open
+on the right by a crisp wedge, with the control point (a diamond) dead centre, so it does
+not read as Scout's C with its needle.
 
 Geometry is in units of 1/1254 of the tile's width (the master's size).
 
@@ -40,24 +41,36 @@ GRAIN = 0.07
 MASTER = 1254  # the master's size, as Scout's, so the grain has the same scale
 SEED = 8
 
-# The mark: a round C (a ring, opened on the right by a wedge from the centre, so its ends
-# are sharp radial cuts) with the control point, a diamond, in the middle.
+# The mark: a rounded-square C (a squircle ring, |x|^4 + |y|^4 = r^4, concentric so the
+# stroke is even, opened on the right by a wedge from the centre, so its ends are sharp
+# cuts) with the control point, a diamond, at the exact centre.
 # Units: 1/1254 of the tile.
 U = 1 / 1254
 CX = CY = 627
-OUTER = 345  # ring radii
+OUTER = 345  # squircle half-sizes
 INNER = 182
+SQUIRCLE = 4  # the exponent: 2 is a circle, higher is boxier
 MOUTH = 330  # the wedge's half-height at the tile's right edge
-POINT = (617, 627, 105)  # diamond centre x, y, half-diagonal
+POINT = (CX, CY, 100)  # diamond centre x, y, half-diagonal
 
 
-def mark_shapes() -> list[tuple[str, object, int]]:
-    """The mark in tile units (0..1254), painted in order: 255 adds, 0 cuts.
-    ("circle", radius) is centred on the tile; ("poly", points) is a polygon."""
+def squircle(r: float, n: int = 256) -> list[tuple[float, float]]:
+    """A squircle of half-size r centred on the tile, as an n-point polygon."""
+    e = 2 / SQUIRCLE
+    pts = []
+    for i in range(n):
+        t = 2 * np.pi * i / n
+        c, s = np.cos(t), np.sin(t)
+        pts.append((CX + r * np.sign(c) * abs(c) ** e, CY + r * np.sign(s) * abs(s) ** e))
+    return pts
+
+
+def mark_shapes() -> list[tuple[str, list[tuple[float, float]], int]]:
+    """The mark as polygons in tile units (0..1254), painted in order: 255 adds, 0 cuts."""
     px, py, pr = POINT
     return [
-        ("circle", OUTER, 255),
-        ("circle", INNER, 0),
+        ("poly", squircle(OUTER), 255),
+        ("poly", squircle(INNER), 0),
         ("poly", [(CX, CY), (1254, CY - MOUTH), (1254, CY + MOUTH)], 0),
         ("poly", [(px, py - pr), (px + pr, py), (px, py + pr), (px - pr, py)], 255),
     ]
@@ -71,12 +84,8 @@ def mark_mask(size: int, scale: float = 1.0, ss: int = 8) -> np.ndarray:
     d = ImageDraw.Draw(im)
     o = (1 - scale) / 2
     pt = lambda x, y: ((o + x * U * scale) * S, (o + y * U * scale) * S)
-    for kind, geo, fill in mark_shapes():
-        if kind == "circle":
-            (x0, y0), (x1, y1) = pt(CX - geo, CY - geo), pt(CX + geo, CY + geo)
-            d.ellipse([x0, y0, x1, y1], fill=fill)
-        else:
-            d.polygon([pt(x, y) for x, y in geo], fill=fill)
+    for _, geo, fill in mark_shapes():
+        d.polygon([pt(x, y) for x, y in geo], fill=fill)
     im = im.resize((size, size), Image.BOX)
     return np.asarray(im, dtype=np.float32) / 255
 
