@@ -5,6 +5,8 @@ import { format } from 'date-fns';
 
 const api = vi.hoisted(() => ({ apiFetch: vi.fn() }));
 vi.mock('../../services/api', async (orig) => ({ ...(await orig<object>()), ...api }));
+// The Videos section reads Control Scout on its own (teamVideos.test.tsx); these tests count Home's other calls.
+vi.mock('../ui/TeamVideos', async (orig) => ({ ...(await orig<object>()), useTeamVideos: () => null }));
 vi.mock('../../components/FtcStats', async (orig) => ({
   ...(await orig<object>()),
   useFtcTeam: () => ({ loading: false, notConnected: true, data: null, error: null, refresh: () => {} }),

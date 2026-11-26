@@ -39,6 +39,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { Countdown, useHalfMinuteTick, useNow } from '../ui/Countdown';
 import { dueMoment } from '../../utils/countdown';
 import { CensoredText } from '../../components/CensoredText';
+import { TeamVideos, useTeamVideos } from '../ui/TeamVideos';
 
 const ACTIVITY_ROUTE: Record<ActivityItem['kind'], string> = {
   task: '/tasks', event: '/calendar', attendance: '/attendance', member: '/teams', budget: '/budget',
@@ -82,6 +83,8 @@ export function HomePage(props: HomePageProps) {
   const greet = h >= 5 && h < 12 ? t('dashboard.greetMorning') : h >= 12 && h < 17 ? t('dashboard.greetAfternoon') : h >= 17 && h < 22 ? t('dashboard.greetEvening') : t('dashboard.greetHello');
   const first = String(currentUser?.name || '').split(' ')[0];
   const teamName = derived.myTeam?.name || t('dashboard.yourTeam');
+  // The team's Behind the Bot episodes and latest clips (Control Scout); hidden when there are none.
+  const videos = useTeamVideos(currentUser?.team_id);
 
   return (
     <Page>
@@ -136,6 +139,8 @@ export function HomePage(props: HomePageProps) {
           ) : (
             <MyWork mine={mine} onNavigate={navigate} />
           )}
+
+          <TeamVideos answer={videos} delay={0.1} />
 
           <Section title="Activity" description="What the team has been up to" delay={0.12}>
             {derived.activityItems.length === 0 ? (
