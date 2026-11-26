@@ -12,6 +12,8 @@ import { Section } from './page';
 export interface TeamVideosAnswer { team: number | null; videos: Videos | null }
 
 const SERIES: Record<string, string> = { 'behind-the-bot': 'Behind the Bot' };
+/** The series the dashboard badges. */
+export const BADGE_SERIES = 'behind-the-bot';
 /** A series' name as people say it ("behind-the-bot" → "Behind the Bot"). */
 export const seriesName = (s: string) => SERIES[s] ?? s.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 const thumb = (videoId: string) => `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/mqdefault.jpg`;
@@ -38,7 +40,9 @@ export function useTeamVideos(teamId: unknown) {
 export function TeamVideos({ answer, delay = 0.1 }: { answer: TeamVideosAnswer | null; delay?: number }) {
   const v = answer?.videos;
   const team = answer?.team;
-  if (!v || !team || (!v.featured.length && !v.clips.length)) return null;
+  // The badge is Behind the Bot's, as on the team's Control Scout page; other series (Top 25, …) may come later.
+  const badges = v?.featured.filter((f) => f.series === BADGE_SERIES) ?? [];
+  if (!v || !team || (!badges.length && !v.clips.length)) return null;
   const scoutHref = `${CONTROL_SCOUT_URL}/teams/${team}`;
   return (
     <Section
@@ -52,14 +56,14 @@ export function TeamVideos({ answer, delay = 0.1 }: { answer: TeamVideosAnswer |
         </a>
       }
     >
-      {v.featured.length > 0 && (
+      {badges.length > 0 && (
         <ul className="mb-4 flex flex-wrap gap-2" aria-label="Featured in">
-          {v.featured.map((f) => (
+          {badges.map((f) => (
             <li key={f.videoId}>
               <a href={watchUrl(f.videoId)} target="_blank" rel="noopener noreferrer" title={f.title}
                 className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                 <Clapperboard className="size-3.5" aria-hidden="true" />
-                Featured on {seriesName(f.series)}{f.season && v.featured.filter((x) => x.series === f.series).length > 1 ? ` · ${f.season}` : ''}
+                Featured on {seriesName(f.series)}{f.season && badges.length > 1 ? ` · ${f.season}` : ''}
               </a>
             </li>
           ))}

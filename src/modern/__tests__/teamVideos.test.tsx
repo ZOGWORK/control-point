@@ -65,6 +65,16 @@ describe('TeamVideos', () => {
     expect(imgs[1]).toHaveAttribute('src', 'https://i.ytimg.com/vi/ccccccccccc/mqdefault.jpg');
   });
 
+  it('badges Behind the Bot only: another series is no badge, and alone draws nothing', () => {
+    const top = { series: 'top-25', videoId: 'eeeeeeeeeee', season: 2025, title: 'Top 25' };
+    render(<TeamVideos answer={answer({ featured: [top, { series: 'behind-the-bot', videoId: 'ddddddddddd', season: 2025, title: 'a' }] })} />);
+    expect(screen.getAllByRole('link', { name: /Featured on/ })).toHaveLength(1);
+    expect(screen.getByRole('link', { name: 'Featured on Behind the Bot' })).toBeInTheDocument();
+    cleanup();
+    const { container } = render(<TeamVideos answer={answer({ featured: [top], clips: [] })} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('names series as people say them', () => {
     expect(seriesName('behind-the-bot')).toBe('Behind the Bot');
     expect(seriesName('pits-and-parts')).toBe('Pits And Parts');
