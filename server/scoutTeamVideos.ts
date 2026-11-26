@@ -8,7 +8,21 @@
 // Scout that just didn't answer.
 
 export interface FeaturedVideo { series: string; videoId: string; season: number | null; title: string }
-export interface TeamClip { videoId: string; start: number; end: number | null; event: string; match: string; title: string }
+/** A clip's own frame: tile (`col`, `row`) of a YouTube storyboard sheet `cols` × `rows` tiles big. */
+export interface ClipStill { src: string; col: number; row: number; cols: number; rows: number }
+/** `still`: set for a clip cut from a recording (else the video's own thumbnail is that match). */
+export interface TeamClip { videoId: string; start: number; end: number | null; event: string; match: string; title: string; still?: ClipStill }
+
+/** A still only from YouTube's own image host, with a tile inside its sheet. */
+export function parseStill(v: unknown): ClipStill | null {
+  if (!v || typeof v !== "object") return null;
+  const s = v as Record<string, unknown>;
+  const src = typeof s.src === "string" && s.src.length <= 1000 && s.src.startsWith("https://i.ytimg.com/") ? s.src : null;
+  const n = (x: unknown, max: number) => (Number.isInteger(x) && (x as number) >= 0 && (x as number) <= max ? (x as number) : null);
+  const cols = n(s.cols, 20), rows = n(s.rows, 20), col = n(s.col, 19), row = n(s.row, 19);
+  if (!src || !cols || !rows || col == null || row == null || col >= cols || row >= rows) return null;
+  return { src, col, row, cols, rows };
+}
 export interface TeamVideos { featured: FeaturedVideo[]; clips: TeamClip[] }
 
 export const CACHE_MS = 5 * 60_000;
@@ -39,7 +53,8 @@ export function parseTeamVideos(body: unknown): TeamVideos | null {
     const videoId = text(r?.videoId, 11), start = seconds(r?.start), event = text(r?.event), match = text(r?.match, 20);
     if (!videoId || !VIDEO_ID.test(videoId) || start == null || !event || !match) continue;
     const end = seconds(r?.end);
-    clips.push({ videoId, start, end: end != null && end > start ? end : null, event, match, title: text(r?.title) ?? `${match} · ${event}` });
+    const still = parseStill(r?.still);
+    clips.push({ videoId, start, end: end != null && end > start ? end : null, event, match, title: text(r?.title) ?? `${match} · ${event}`, ...(still ? { still } : {}) });
   }
   return { featured: featured.slice(0, MAX_FEATURED), clips: clips.slice(0, MAX_CLIPS) };
 }

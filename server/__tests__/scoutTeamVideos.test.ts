@@ -4,7 +4,7 @@
 import http from "http";
 import express from "express";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { CACHE_MS, FAIL_MS, MAX_CLIPS, createTeamVideosClient, parseTeamVideos, watchUrl } from "../scoutTeamVideos";
+import { CACHE_MS, FAIL_MS, MAX_CLIPS, createTeamVideosClient, parseStill, parseTeamVideos, watchUrl } from "../scoutTeamVideos";
 import { startTestServer, seedTeam, seedMember, type TestServer } from "./helpers/testServer";
 
 const KEY = "test-internal-key-0123456789-abcdefghijklmnop";
@@ -34,6 +34,14 @@ describe("parseTeamVideos", () => {
   it("is null when the answer isn't the shape, and caps the clips", () => {
     for (const bad of [null, "x", {}, { featured: [] }, { clips: [] }, { featured: {}, clips: [] }]) expect(parseTeamVideos(bad)).toBeNull();
     expect(parseTeamVideos({ featured: [], clips: Array.from({ length: 10 }, (_, i) => clip(i + 1)) })!.clips).toHaveLength(MAX_CLIPS);
+  });
+  it("passes a clip's still only from YouTube's image host, with its tile inside the sheet", () => {
+    const ok = { src: "https://i.ytimg.com/sb/ccccccccccc/storyboard3_L2/M0.jpg?sigh=x", col: 2, row: 1, cols: 5, rows: 5 };
+    expect(parseStill({ ...ok, extra: 1 })).toEqual(ok);
+    for (const bad of [null, "x", { ...ok, src: "https://evil.test/a.jpg" }, { ...ok, src: "javascript:alert(1)" }, { ...ok, col: 5 }, { ...ok, row: -1 }, { ...ok, cols: 0 }, { ...ok, col: 1.5 }]) expect(parseStill(bad)).toBeNull();
+    const p = parseTeamVideos({ featured: [], clips: [clip(1, { still: ok }), clip(2, { still: { ...ok, src: "http://i.ytimg.com/x" } })] })!;
+    expect(p.clips[0].still).toEqual(ok);
+    expect(p.clips[1]).not.toHaveProperty("still");
   });
   it("links to YouTube at the clip's start", () => {
     expect(watchUrl("ccccccccccc", 300)).toBe("https://www.youtube.com/watch?v=ccccccccccc&t=300s");

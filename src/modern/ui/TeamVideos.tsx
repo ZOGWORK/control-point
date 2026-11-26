@@ -72,7 +72,13 @@ export function TeamVideos({ answer, delay = 0.1 }: { answer: TeamVideosAnswer |
               <a href={watchUrl(c.videoId, c.start)} target="_blank" rel="noopener noreferrer" aria-label={`Play ${c.title}`}
                 className="group block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
                 <span className="relative block aspect-video overflow-hidden rounded-lg border border-border bg-muted">
-                  <img src={thumb(c.videoId)} alt="" loading="lazy" className="size-full object-cover transition-opacity group-hover:opacity-90" />
+                  {c.still ? (
+                    // The clip's own frame: one tile of the storyboard sheet, the sheet scaled so the tile fills the box.
+                    <img src={c.still.src} alt="" loading="lazy" className="absolute max-w-none transition-opacity group-hover:opacity-90"
+                      style={{ width: `${c.still.cols * 100}%`, height: `${c.still.rows * 100}%`, left: `${-c.still.col * 100}%`, top: `${-c.still.row * 100}%` }} />
+                  ) : (
+                    <img src={thumb(c.videoId)} alt="" loading="lazy" className="size-full object-cover transition-opacity group-hover:opacity-90" />
+                  )}
                   <span className="absolute inset-0 flex items-center justify-center">
                     <span className="flex size-9 items-center justify-center rounded-full bg-background/85 text-foreground shadow-sm transition-transform group-hover:scale-105">
                       <Play className="ml-0.5 size-4" aria-hidden="true" />

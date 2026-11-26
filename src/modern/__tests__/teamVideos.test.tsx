@@ -54,6 +54,17 @@ describe('TeamVideos', () => {
     }
   });
 
+  it("a recording's clip shows its own frame (a storyboard tile); others the video's thumbnail", () => {
+    const still = { src: 'https://i.ytimg.com/sb/ccccccccccc/M0.jpg', col: 2, row: 1, cols: 5, rows: 5 };
+    const { container } = render(<TeamVideos answer={answer({ featured: [], clips: [{ ...clip(3), still }, clip(1)] })} />);
+    const imgs = [...container.querySelectorAll('img')];
+    expect(imgs[0]).toHaveAttribute('src', still.src);
+    expect(imgs[0].style.width).toBe('500%');
+    expect(imgs[0].style.left).toBe('-200%');
+    expect(imgs[0].style.top).toBe('-100%');
+    expect(imgs[1]).toHaveAttribute('src', 'https://i.ytimg.com/vi/ccccccccccc/mqdefault.jpg');
+  });
+
   it('names series as people say them', () => {
     expect(seriesName('behind-the-bot')).toBe('Behind the Bot');
     expect(seriesName('pits-and-parts')).toBe('Pits And Parts');
