@@ -36,6 +36,16 @@ describe('ModernLanding (v8)', () => {
     expect(onGetStarted).toHaveBeenCalledTimes(3);
   });
 
+  it('shows the bare C, not the tiled logo, in the bar and the hero', () => {
+    const { container } = render(<ModernLanding onSignIn={vi.fn()} onGetStarted={vi.fn()} />);
+    const bar = container.querySelector('header')!;
+    expect(bar.querySelector('[data-brand-glyph]')).not.toBeNull();
+    expect(bar.querySelector('img')).toBeNull();
+    const hero = container.querySelector('#top section')!;
+    expect(hero.querySelector('[data-brand-glyph]')).not.toBeNull();
+    expect(hero.querySelector('img')).toBeNull();
+  });
+
   it('keeps the in-page anchors pointing at sections that exist', () => {
     const { container } = render(<ModernLanding onSignIn={vi.fn()} onGetStarted={vi.fn()} />);
     const nav = screen.getAllByRole('navigation', { name: 'Main' })[0];

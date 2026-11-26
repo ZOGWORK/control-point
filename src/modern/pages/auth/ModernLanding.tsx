@@ -82,7 +82,7 @@ export function ModernLanding({ onSignIn, onGetStarted }: { onSignIn: () => void
         <header className={cn('fixed inset-x-0 top-0 z-40 border-b transition-colors', scrolled ? 'border-border bg-background/80 backdrop-blur-lg' : 'border-transparent')}>
           <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6" aria-label="Main">
             <a href="#top" className={cn('flex min-h-11 items-center gap-2.5 rounded-lg', FOCUS)}>
-              <BrandLogo className="size-8 rounded-lg" decorative />
+              <BrandGlyph className="size-6 text-foreground" />
               <span className="font-sans text-[15px] font-semibold tracking-[-0.01em]">Control Point</span>
             </a>
             <div className="hidden items-center gap-1 text-sm text-muted-foreground md:flex">
