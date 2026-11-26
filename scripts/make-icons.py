@@ -6,8 +6,9 @@ so a re-run with no code change leaves every file byte-identical.
 The tile is a sibling of Control Scout's v8 icon (control-scout scripts/brand-icon.mjs):
 the same near-black tile with the same wash of three glows along the top edge, the
 same fine grain, and the mark in the same soft white with a soft shadow. The mark is
-Control Point's own: a faceted C, all sharp corners, with the control point (a diamond)
-inside it, so it does not read as Scout's round C with its needle.
+Control Point's own: a rounded-square C (a squircle ring, even stroke all round) cut open
+on the right by a crisp wedge, with the control point (a diamond) dead centre, so it does
+not read as Scout's C with its needle.
 
 Geometry is in units of 1/1254 of the tile's width (the master's size).
 
@@ -17,6 +18,7 @@ Writes:
   icon-192.png, icon-512.png   full-bleed (the installed app, purpose "any")
   icon-maskable-512.png  512  full-bleed, mark at 78% inside Android's safe zone
   logo.png               512  full-bleed, opaque (in-app logo; CSS rounds the corners)
+  mark.png               512  the bare mark, white on transparent, filling the box (landing hero)
   og-image.jpg           1200x630 link-preview card
 """
 from __future__ import annotations
@@ -39,42 +41,51 @@ GRAIN = 0.07
 MASTER = 1254  # the master's size, as Scout's, so the grain has the same scale
 SEED = 8
 
-# The mark: a faceted C (an octagon with a stroke cut out, opened on the right by a wedge
-# from the centre) with the control point, a diamond, in the middle. Sharp corners
-# throughout, so it reads apart from Scout's round C. Units: 1/1254 of the tile.
+# The mark: a rounded-square C (a squircle ring, |x|^4 + |y|^4 = r^4, concentric so the
+# stroke is even, opened on the right by a wedge from the centre, so its ends are sharp
+# cuts) with the control point, a diamond, at the exact centre.
+# Units: 1/1254 of the tile.
 U = 1 / 1254
 CX = CY = 627
-OUTER = (345, 150)  # half-size, corner chamfer
-INNER = (170, 78)
+OUTER = 345  # squircle half-sizes
+INNER = 182
+SQUIRCLE = 4  # the exponent: 2 is a circle, higher is boxier
 MOUTH = 330  # the wedge's half-height at the tile's right edge
-POINT = (617, 627, 105)  # diamond centre x, y, half-diagonal
+POINT = (CX, CY, 100)  # diamond centre x, y, half-diagonal
 
 
-def octagon(h: float, k: float) -> list[tuple[float, float]]:
-    c = CX
-    return [(c - h + k, c - h), (c + h - k, c - h), (c + h, c - h + k), (c + h, c + h - k),
-            (c + h - k, c + h), (c - h + k, c + h), (c - h, c + h - k), (c - h, c - h + k)]
+def squircle(r: float, n: int = 256) -> list[tuple[float, float]]:
+    """A squircle of half-size r centred on the tile, as an n-point polygon."""
+    e = 2 / SQUIRCLE
+    pts = []
+    for i in range(n):
+        t = 2 * np.pi * i / n
+        c, s = np.cos(t), np.sin(t)
+        pts.append((CX + r * np.sign(c) * abs(c) ** e, CY + r * np.sign(s) * abs(s) ** e))
+    return pts
 
 
-def mark_polys() -> list[tuple[list[tuple[float, float]], int]]:
+def mark_shapes() -> list[tuple[str, list[tuple[float, float]], int]]:
     """The mark as polygons in tile units (0..1254), painted in order: 255 adds, 0 cuts."""
     px, py, pr = POINT
     return [
-        (octagon(*OUTER), 255),
-        (octagon(*INNER), 0),
-        ([(CX, CY), (1254, CY - MOUTH), (1254, CY + MOUTH)], 0),
-        ([(px, py - pr), (px + pr, py), (px, py + pr), (px - pr, py)], 255),
+        ("poly", squircle(OUTER), 255),
+        ("poly", squircle(INNER), 0),
+        ("poly", [(CX, CY), (1254, CY - MOUTH), (1254, CY + MOUTH)], 0),
+        ("poly", [(px, py - pr), (px + pr, py), (px, py + pr), (px - pr, py)], 255),
     ]
 
 
-def mark_mask(size: int, scale: float = 1.0, ss: int = 4) -> np.ndarray:
-    """The mark's coverage (0..1) on a size x size tile, drawn at ss x and box-filtered down."""
+def mark_mask(size: int, scale: float = 1.0, ss: int = 8) -> np.ndarray:
+    """The mark's coverage (0..1) on a size x size tile, drawn at ss x and box-filtered down
+    (8x, so the round edges stay crisp and the cut ends stay sharp)."""
     S = size * ss
     im = Image.new("L", (S, S), 0)
     d = ImageDraw.Draw(im)
     o = (1 - scale) / 2
-    for pts, fill in mark_polys():
-        d.polygon([((o + x * U * scale) * S, (o + y * U * scale) * S) for x, y in pts], fill=fill)
+    pt = lambda x, y: ((o + x * U * scale) * S, (o + y * U * scale) * S)
+    for _, geo, fill in mark_shapes():
+        d.polygon([pt(x, y) for x, y in geo], fill=fill)
     im = im.resize((size, size), Image.BOX)
     return np.asarray(im, dtype=np.float32) / 255
 
@@ -130,17 +141,27 @@ def tile(size: int, scale: float = 1.0) -> Image.Image:
     noise = np.random.default_rng(SEED).random((N, N), dtype=np.float32)[..., None]
     ov = np.where(img < 0.5, 2 * img * noise, 1 - 2 * (1 - img) * (1 - noise))
     img = img * (1 - GRAIN) + ov * GRAIN
-    # The mark: soft white (white at 18% to a faint lavender grey at 82%), with a soft
-    # shadow (black 35%, blur 3% of the size, 1% down).
+    # The mark: soft white (white at 18% to a faint lavender grey at 82%), with a tight
+    # shadow (black 30%, blur 1.6% of the size, 0.8% down) so the edges stay crisp.
     m = mark_mask(N, scale)
-    shadow = blur(m, N * 0.03 / 2)
-    dy = int(round(N * 0.01))
-    shadow = np.vstack([np.zeros((dy, N), np.float32), shadow[: N - dy]]) * 0.35
+    shadow = blur(m, N * 0.016 / 2)
+    dy = int(round(N * 0.008))
+    shadow = np.vstack([np.zeros((dy, N), np.float32), shadow[: N - dy]]) * 0.30
     img = over(img, np.zeros(3, np.float32), shadow)
     t = np.clip((yy[..., None] / N - 0.18) / (0.82 - 0.18), 0, 1)
     ink = (np.array(INK_TOP, np.float32) * (1 - t) + np.array(INK_BOTTOM, np.float32) * t) / 255
     img = over(img, ink, m)
     return Image.fromarray(np.clip(np.round(img * 255), 0, 255).astype(np.uint8), "RGB")
+
+
+def bare_mark(size: int) -> Image.Image:
+    """The mark alone, white on transparent, scaled so the C fills the box (a 2% margin)."""
+    scale = 1254 / (2 * OUTER) * 0.96
+    a = mark_mask(size, scale)
+    rgba = np.zeros((size, size, 4), np.uint8)
+    rgba[..., :3] = 255
+    rgba[..., 3] = np.clip(np.round(a * 255), 0, 255).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
 
 
 def down(im: Image.Image, size: int) -> Image.Image:
@@ -217,6 +238,7 @@ def main() -> None:
     down(master, 192).save(OUT / "icon-192.png", optimize=True)
     down(master, 512).save(OUT / "icon-512.png", optimize=True)
     down(master, 512).save(OUT / "logo.png", optimize=True)
+    bare_mark(512).save(OUT / "mark.png", optimize=True)
     down(maskable, 512).save(OUT / "icon-maskable-512.png", optimize=True)
     og_image(master).save(OUT / "og-image.jpg", quality=90, optimize=True, progressive=True)
     print("ok")
