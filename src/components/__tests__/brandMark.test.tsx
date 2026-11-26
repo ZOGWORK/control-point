@@ -27,6 +27,19 @@ function insideConvex(p: Pt, poly: Pt[]) {
   return true;
 }
 
+/** The mouth is a real opening: its apex sits in the bowl, it reaches past the outer edge, and where it
+ *  crosses the C's right-hand edge it is at least half as tall as the bowl, so the stroke is cut clean
+ *  through rather than by a slit. */
+function isOpenMouth(mouth: Pt[], outer: Pt[], inner: Pt[]) {
+  const [apex, ...far] = mouth;
+  const right = Math.max(...outer.map(([x]) => x));
+  if (!insideConvex(apex, inner) || far.some(([x]) => x < right)) return false;
+  // The wedge's y at the outer right edge, along each side from the apex.
+  const ys = far.map(([x, y]) => apex[1] + ((y - apex[1]) * (right - apex[0])) / (x - apex[0]));
+  const bowl = Math.max(...inner.map(([, y]) => y)) - Math.min(...inner.map(([, y]) => y));
+  return Math.max(...ys) - Math.min(...ys) >= bowl / 2;
+}
+
 function renderFallback() {
   render(<BrandLogo />);
   fireEvent.error(screen.getByRole('img', { name: 'Control Point logo' }));
@@ -63,10 +76,14 @@ describe('BrandLogo', () => {
     const corner = Math.max(...o.map(([x, y]) => Math.hypot(x - 50, y - 50)));
     expect(corner).toBeGreaterThan(half * 1.1);
     // The mouth starts in the bowl and cuts right through the C's right-hand side, so it is open.
-    const [apex, ...far] = points(mouth);
-    expect(insideConvex(apex, i)).toBe(true);
-    const right = Math.max(...o.map(([x]) => x));
-    for (const [x] of far) expect(x).toBeGreaterThanOrEqual(right);
+    expect(isOpenMouth(points(mouth), o, i)).toBe(true);
+  });
+
+  it('rejects a mouth that is only a slit', () => {
+    const mask = renderFallback().querySelector('mask')!;
+    const [outer, inner] = [...mask.querySelectorAll('polygon')].map(points);
+    const slit: Pt[] = [[50, 50], [100, 48], [100, 52]];
+    expect(isOpenMouth(slit, outer, inner)).toBe(false);
   });
 
   it('keeps the mark even: both squircles and the diamond share one centre', () => {
