@@ -82,8 +82,9 @@ import { CLOSE_FENCE, FINISH_BLOCK_TOKENS, finishBlockPrompt, finishCutReply, on
 import { extractRememberBlocks, isDuplicateFact, memoryPromptBlock, nudgeText, localHourAndDay, MAX_USER_MEMORIES, MAX_TEAM_MEMORIES, MAX_FACT_CHARS } from "./server/brunoMemory.js";
 import { quoteUntrusted } from "./server/scoutingContext.js";
 import { serveDist } from "./server/staticAssets.js";
-import { createSharedAccounts, isHandoffState, isScoutVia, scoutOriginFrom, type ScoutSignin } from "./server/sharedAccounts.js";
+import { createSharedAccounts, internalKeyFrom, isHandoffState, isScoutVia, scoutOriginFrom, type ScoutSignin } from "./server/sharedAccounts.js";
 import { createReliabilityClient } from "./server/scoutReliability.js";
+import { createTeamVideosClient } from "./server/scoutTeamVideos.js";
 import { deleteAgeSql, isAdult, setAdult } from "./server/ageConfirm.js";
 import { estimateTokens, fitToRequestBytes, fitToWindow, geminiInputTokens, anthropicInputTokens, providerTooLargeMessage, sanitizeBrunoAttachments } from "./server/brunoInput.js";
 import { homeworkScore, isOffTopicSchoolwork, OFF_TOPIC_REPLY } from "./server/brunoScope.js";
@@ -6619,6 +6620,21 @@ async function startServer() {
     const teams = String(req.query.teams || "").split(",").map((x) => parseInt(x, 10)).filter((n) => n >= 1 && n <= 999999);
     if (!teams.length || teams.length > 100) return res.status(400).json({ error: "teams: 1 to 100 team numbers, comma separated" });
     res.json(await reliability.get(season, teams));
+  });
+
+  // The team's videos from Control Scout (server/scoutTeamVideos.ts): its Behind the Bot episodes and latest
+  // match clips, for the dashboard. The workspace's own FTC number only; null (the section hidden) when it has
+  // none or Scout doesn't answer, never an error.
+  const teamVideos = createTeamVideosClient({ origin: scoutOriginFrom(process.env) ?? "https://controlscout.org", key: internalKeyFrom(process.env) });
+  app.get("/api/ftc/team-videos", async (req, res) => {
+    const auth = await requireAuth(req, res);
+    if (!auth) return;
+    const team = (await dbGet("SELECT ftc_team_number FROM teams WHERE id = ?", auth.teamId)) as any;
+    const number = parseInt(team?.ftc_team_number, 10) || 0;
+    const videos = number ? await teamVideos.get(number) : null;
+    // The answer depends on the session's workspace, the URL doesn't: never kept by the browser (the server caches).
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ team: videos ? number : null, videos });
   });
 
   app.get("/api/ftc/scout/team", async (req, res) => {
