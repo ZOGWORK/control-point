@@ -6632,7 +6632,8 @@ async function startServer() {
     const team = (await dbGet("SELECT ftc_team_number FROM teams WHERE id = ?", auth.teamId)) as any;
     const number = parseInt(team?.ftc_team_number, 10) || 0;
     const videos = number ? await teamVideos.get(number) : null;
-    res.setHeader("Cache-Control", "private, max-age=60");
+    // The answer depends on the session's workspace, the URL doesn't: never kept by the browser (the server caches).
+    res.setHeader("Cache-Control", "no-store");
     res.json({ team: videos ? number : null, videos });
   });
 

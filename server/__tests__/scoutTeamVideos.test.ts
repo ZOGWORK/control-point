@@ -142,6 +142,9 @@ describe("GET /api/ftc/team-videos", () => {
     expect(r.body.videos.featured).toEqual([{ series: "behind-the-bot", videoId: "ddddddddddd", season: 2025, title: "Behind the Bot: Team 100" }]);
     expect(r.body.videos.clips.map((c: any) => c.match)).toEqual(["Q3", "Q1"]);
     expect(seen.at(-1)).toEqual({ path: "/internal/teams/100/videos", key: KEY });
+    // The URL is the same for every workspace: the browser must never answer it from its cache after a switch.
+    const raw = await fetch(`${srv.base}/api/ftc/team-videos`, { headers: { cookie: `cp_session=${encodeURIComponent(admin)}` } });
+    expect(raw.headers.get("cache-control")).toBe("no-store");
   });
 
   it("a workspace with no FTC team: nothing, and Scout isn't asked", async () => {
