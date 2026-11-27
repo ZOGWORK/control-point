@@ -304,6 +304,8 @@ export const POWER_RANKINGS_RATE = { max: 10, windowMs: 60 * 60 * 1000 };
 export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
 /** Room for the sentence and all six points (seasons, records, decimal OPRs run to many tokens): a cut-off reply is malformed JSON. */
 export const SEARCH_ANSWER_MAX_TOKENS = 900;
+/** The JSON body limit for /internal/bruno/discord-chat: room for a full packet at its caps, escaped and in UTF-8. */
+export const DISCORD_CHAT_BODY_LIMIT = "384kb";
 /** Calls per hour to /internal/bruno/discord-chat: one per mention or reply to the bot (Scout caches repeats briefly). */
 /** A ceiling against a runaway loop only, far above any server's real use (the owner asked for no limits on the bot,
  *  2026-11-26; each answer may take a few calls now that Bruno looks things up in steps). */
@@ -659,6 +661,11 @@ export function createSharedAccounts(deps: SharedAccountDeps) {
       f.count++;
       return res.status(401).json({ error: "Unauthorized" });
     });
+    // The Discord chat's packet is the one big body here: up to 2,000 + 40,000 + 12 x 4,000 characters, which JSON
+    // escaping and three-byte characters (an en dash in every "2025–26") can take past 200 KB. Its own parser runs
+    // first so the packet reaches validateChatPacket (a clear invalid_packet) instead of a 413 at 16 KB; every other
+    // route keeps the small limit (the parser below skips a body already read).
+    router.use("/bruno/discord-chat", express.json({ limit: DISCORD_CHAT_BODY_LIMIT }));
     router.use(express.json({ limit: "16kb" }));
     router.use((_req, res, next) => { res.setHeader("Cache-Control", "no-store"); next(); });
 

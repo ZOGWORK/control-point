@@ -163,6 +163,19 @@ describe("route", () => {
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "discord-chat", system: DISCORD_CHAT_SYSTEM, maxTokens: DISCORD_CHAT_MAX_TOKENS }));
     expect((write.mock.calls[0] as any[])[0].user).toContain('MESSAGE: "hi bruno"');
   });
+  it("takes a full packet over HTTP: the body limit is the packet's caps, not the small internal one (16 KB)", async () => {
+    const write = vi.fn(async () => '{"text": "4215 had **16.0** OPR in 2026–27.", "search": true}');
+    const post = await boot({ brunoWrite: write });
+    // Every cap at once, in three-byte characters and quotes JSON must escape: the largest packet the bot can send.
+    const facts = Array.from({ length: 66 }, (_, i) => `Team ${1000 + i} "2025–26": ${"–".repeat(570)}`);
+    const history = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? "bruno" : "user", text: "“–” ".repeat(990) }));
+    const r = await post({ message: "–".repeat(1999), facts, history });
+    expect(JSON.stringify({ facts, history }).length).toBeGreaterThan(16_000 * 4);
+    expect(r.status).toBe(200);
+    expect(write).toHaveBeenCalledTimes(1);
+    // Past the caps it is still the packet check that answers, with a clear reason.
+    expect((await post({ message: "x".repeat(2001), facts: [] })).status).toBe(400);
+  });
   it("400 on a bad packet, 503 with no AI, 502 when it fails or replies off-shape", async () => {
     const write = vi.fn();
     expect((await (await boot({ brunoWrite: write }))({ facts: [] })).body).toEqual({ error: "invalid_packet", field: "message_required" });
