@@ -137,15 +137,16 @@
  * Bruno chatting in Discord through Scout's bot (a mention, or a reply to one of its answers):
  *
  *   POST /internal/bruno/discord-chat
- *     body: { message: string (1..500 once whitespace is folded),
- *             facts: string[] (0..40 lines, each 1..400, 8,000 in all): what Scout's search found,
- *             history?: [{ role: "user" | "bruno", text (1..600) }] (0..6, oldest first): the reply chain before it }
- *     200 { text: string, search: boolean }   Bruno's chat reply (1..4 sentences, plain text,
- *       <= 700 characters), written from the facts and history only where it names records;
- *       search is true when the facts answer the message (Scout then shows its records card).
+ *     body: { message: string (1..2,000 once whitespace is folded),
+ *             facts: string[] (0..120 lines, each 1..600, 40,000 in all): what Scout's search found,
+ *             history?: [{ role: "user" | "bruno", text (1..4,000) }] (0..12, oldest first): the reply chain before it }
+ *     200 { text: string, search: boolean }   Bruno's chat reply (as long as the ask needs, line breaks and
+ *       Discord's "- " / "1." / **bold** kept, <= 3,800 characters), written from the facts and history only
+ *       where it names records, every number labelled with its season; it may end with "LOOKUP: <search>" lines
+ *       (Scout runs them and asks again). search is true when the facts answer the message.
  *       Scout drops any reply naming a number that isn't in the facts, message or history.
  *     400 { error: "invalid_packet", field }   no message, bad facts or history
- *     429 { error: "rate_limited" }            over 600 calls in the last hour (Retry-After set)
+ *     429 { error: "rate_limited" }            over 6,000 calls in the last hour (Retry-After set)
  *     502 { error: "ai_failed" | "malformed_output" }
  *     503 { error: "ai_unavailable" }
  *     Same aiChat path (offline, system actor), logged in ai_usage as endpoint "discord-chat".
@@ -304,9 +305,12 @@ export const SEARCH_ANSWER_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
 /** Room for the sentence and all six points (seasons, records, decimal OPRs run to many tokens): a cut-off reply is malformed JSON. */
 export const SEARCH_ANSWER_MAX_TOKENS = 900;
 /** Calls per hour to /internal/bruno/discord-chat: one per mention or reply to the bot (Scout caches repeats briefly). */
-export const DISCORD_CHAT_RATE = { max: 600, windowMs: 60 * 60 * 1000 };
-/** A chat reply is 1 to 3 sentences of JSON: room to spare so it's never cut off mid-string. */
-export const DISCORD_CHAT_MAX_TOKENS = 400;
+/** A ceiling against a runaway loop only, far above any server's real use (the owner asked for no limits on the bot,
+ *  2026-11-26; each answer may take a few calls now that Bruno looks things up in steps). */
+export const DISCORD_CHAT_RATE = { max: 6000, windowMs: 60 * 60 * 1000 };
+/** Room for a long answer (a scouting report, a three-team comparison: up to 3,800 characters) as JSON, so it's never
+ *  cut off mid-string. */
+export const DISCORD_CHAT_MAX_TOKENS = 1800;
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
 export const MIN_INTERNAL_KEY_LENGTH = 32;
 export const MAX_DISPLAY_NAME = 100;
