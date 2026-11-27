@@ -106,12 +106,12 @@ describe("prompt and output", () => {
       expect(SCOUT_REDESIGN_PUBLIC).not.toMatch(internal);
     }
   });
-  it("reads the reply and its search flag, strips markdown, caps the length", () => {
-    expect(parseChatOutput('{"text": "Hey! I\'m **Bruno**.", "search": false}')).toEqual({ text: "Hey! I'm Bruno.", search: false });
+  it("reads the reply and its search flag, keeps Discord's own markdown, caps the length", () => {
+    expect(parseChatOutput('{"text": "Hey! I\'m **Bruno**.", "search": false}')).toEqual({ text: "Hey! I'm **Bruno**.", search: false });
     expect(parseChatOutput('```json\n{"text": "30030 Exodus won.", "search": true}\n```')).toEqual({ text: "30030 Exodus won.", search: true });
     // Anything but true is false.
     expect(parseChatOutput('{"text": "Hi", "search": "yes"}').search).toBe(false);
-    const long = parseChatOutput(JSON.stringify({ text: "word ".repeat(300), search: false })).text;
+    const long = parseChatOutput(JSON.stringify({ text: "word ".repeat(1000), search: false })).text;
     expect(long.length).toBeLessThanOrEqual(MAX_REPLY);
     expect(long.endsWith("…")).toBe(true);
   });
@@ -119,6 +119,39 @@ describe("prompt and output", () => {
     expect(() => parseChatOutput("Hey there!")).toThrow("malformed_output");
     expect(() => parseChatOutput('{"text": null}')).toThrow("malformed_output");
     expect(() => parseChatOutput('{"text": "   "}')).toThrow("malformed_output");
+  });
+});
+
+describe("an answer with room (the 2026-11-26 bot audit)", () => {
+  it("takes a Discord-length message, a long thread and a three-team packet", () => {
+    expect(MAX_MESSAGE).toBe(2000);
+    expect(validateChatPacket({ message: "x".repeat(1999), facts: [] }).ok).toBe(true);
+    const facts = Array.from({ length: 100 }, (_, i) => `Team ${1000 + i} in 2025–26 (last season): OPR ${i}.0 ${"·".repeat(300)}`);
+    expect(validateChatPacket({ message: "compare them", facts }).ok).toBe(true);
+    const history = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? "bruno" : "user", text: "word ".repeat(700) }));
+    expect(validateChatPacket({ message: "and?", facts: [], history }).ok).toBe(true);
+  });
+  it("keeps a long answer's lines, bullets and steps, and drops headings, links and code marks", () => {
+    const raw = JSON.stringify({ text: "## Scouting report: 6980\n\n**Overview**: 2-4-0 in 2026–27.\n* Auto 0.1\n+ TeleOp 11.1\n1. Watch the endgame\n\n\n\n[site](https://x.y) `code`", search: true });
+    expect(parseChatOutput(raw).text).toBe("Scouting report: 6980\n\n**Overview**: 2-4-0 in 2026–27.\n- Auto 0.1\n- TeleOp 11.1\n1. Watch the endgame\n\nsite code");
+    const long = parseChatOutput(JSON.stringify({ text: "word ".repeat(600), search: false })).text;
+    expect(long.length).toBeGreaterThan(2000);
+    expect(long.length).toBeLessThanOrEqual(MAX_REPLY);
+  });
+  it("the job sizes the answer to the ask, labels every season, compares like with like, looks things up and never fakes an action", () => {
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/Length: fit the ask/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/never the same short reply again/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/Every number you give says its season/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/"this season", "now" and "rn" mean that season only/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/never treat a missing number as zero/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/LOOKUP: <short search>/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/use it before giving up/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/You cannot follow, watch, remind/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/never claim you did it/);
+    expect(DISCORD_CHAT_SYSTEM).toMatch(/are examples/);
+    // The old one-paragraph ceiling is gone.
+    expect(DISCORD_CHAT_SYSTEM).not.toMatch(/at most 90 words/);
+    expect(DISCORD_CHAT_MAX_TOKENS).toBeGreaterThanOrEqual(1800);
   });
 });
 
@@ -130,6 +163,19 @@ describe("route", () => {
     expect(write).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "discord-chat", system: DISCORD_CHAT_SYSTEM, maxTokens: DISCORD_CHAT_MAX_TOKENS }));
     expect((write.mock.calls[0] as any[])[0].user).toContain('MESSAGE: "hi bruno"');
   });
+  it("takes a full packet over HTTP: the body limit is the packet's caps, not the small internal one (16 KB)", async () => {
+    const write = vi.fn(async () => '{"text": "4215 had **16.0** OPR in 2026–27.", "search": true}');
+    const post = await boot({ brunoWrite: write });
+    // Every cap at once, in three-byte characters and quotes JSON must escape: the largest packet the bot can send.
+    const facts = Array.from({ length: 66 }, (_, i) => `Team ${1000 + i} "2025–26": ${"–".repeat(570)}`);
+    const history = Array.from({ length: 12 }, (_, i) => ({ role: i % 2 ? "bruno" : "user", text: "“–” ".repeat(990) }));
+    const r = await post({ message: "–".repeat(1999), facts, history });
+    expect(JSON.stringify({ facts, history }).length).toBeGreaterThan(16_000 * 4);
+    expect(r.status).toBe(200);
+    expect(write).toHaveBeenCalledTimes(1);
+    // Past the caps it is still the packet check that answers, with a clear reason.
+    expect((await post({ message: "x".repeat(2001), facts: [] })).status).toBe(400);
+  });
   it("400 on a bad packet, 503 with no AI, 502 when it fails or replies off-shape", async () => {
     const write = vi.fn();
     expect((await (await boot({ brunoWrite: write }))({ facts: [] })).body).toEqual({ error: "invalid_packet", field: "message_required" });
@@ -139,7 +185,8 @@ describe("route", () => {
     expect((await (await boot({ brunoWrite: async () => { throw new Error("boom"); } }))(packet())).body).toEqual({ error: "ai_failed" });
     expect((await (await boot({ brunoWrite: async () => "hello!" }))(packet())).body).toEqual({ error: "malformed_output" });
   });
-  it("is rate limited per hour", async () => {
+  it("is rate limited per hour, far above any real use", { timeout: 120_000 }, async () => {
+    expect(DISCORD_CHAT_RATE.max).toBeGreaterThanOrEqual(6000);
     let t = 1_000_000;
     const post = await boot({ brunoWrite: async () => '{"text": "hi", "search": false}', now: () => t });
     for (let i = 0; i < DISCORD_CHAT_RATE.max; i++) expect((await post(packet())).status).toBe(200);
